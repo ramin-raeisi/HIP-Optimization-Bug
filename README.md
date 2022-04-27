@@ -16,6 +16,10 @@ significantly from when we use the `-O0` flag, This error will occur on two syst
 
 I have also tested the code by cuda compiler and the result is the same with the `-O0` flag.
 
+### note
+Using the `[[clang::optnone]]` attribute for the `G1_add` function, we can see that the test results are correct even when compiled with O3 flag.
+This is not ideal, but you can test it in the `optnone` branch.
+
 ## Test1(gfx908)
 - gpu : gfx908
 - os: ubuntu 20.04
