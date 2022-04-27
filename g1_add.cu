@@ -3,6 +3,7 @@
 #include "hip/hip_runtime.h"
 #include <stdint.h>
 #include <iostream>
+#include <assert.h>
 
 void check_hip_error(void) {
     hipError_t err = hipGetLastError();
@@ -1087,9 +1088,25 @@ DEVICE G1_projective G1_add_mixed(G1_projective a, G1_affine b) {
     return ret;
 }
 
+__device__ void print_Fq(const char *name, Fq in, const char *end) {
+    printf("%s=>", name);
+    for (int i = 0; i < Fq_LIMBS; i++) {
+        printf("%u,", in.val[i]);
+    }
+    printf("%s", end);
+}
+
+__device__ void print_G1(const char *name, G1_projective g1, const char *end) {
+    printf("%s==>", name);
+    print_Fq("x", g1.x, "*");
+    print_Fq("y", g1.y, "*");
+    print_Fq("z", g1.z, "\n");
+}
+
 // http://www.hyperelliptic.org/EFD/g1p/auto-shortw-jacobian-0.html#addition-add-2007-bl
 DEVICE G1_projective G1_add(G1_projective a, G1_projective b) {
-
+    // print_G1("a",a,"\n");
+    // print_G1("b",b,"\n");
     const Fq local_zero = Fq_ZERO;
     if (Fq_eq(a.z, local_zero)) return b;
     if (Fq_eq(b.z, local_zero)) return a;
@@ -1137,13 +1154,44 @@ KERNEL void kernel_G1_add(G1_projective *a, G1_projective *b, G1_projective *res
     *result = G1_add(*a, *b);
 }
 
+void print_G1_project(G1_projective in) {
+    std::cout << "x: ";
+    for (int i = 0; i < 12; i++) {
+        std::cout << in.x.val[i] << ", ";
+    }
+    std::cout << std::endl;
+    std::cout << "y: ";
+    for (int i = 0; i < 12; i++) {
+        std::cout << in.y.val[i] << ", ";
+    }
+    std::cout << std::endl;
+    std::cout << "z: ";
+    for (int i = 0; i < 12; i++) {
+        std::cout << in.z.val[i] << ", ";
+    }
+    std::cout << std::endl << std::endl;
+}
+
+void normal_print(uint *in) {
+    for (int i = 0; i < 36; i++) {
+        std::cout << in[i] << ", ";
+    }
+}
+
 int main() {
-    G1_projective a = {{0,      0,          0,          100,        0,          0,          0,          0,          0,          0,          0,          0},
-                       {196605, 1980301312, 3289120770, 3958636555, 1405573306, 1598593111, 1884444485, 2010011731, 2723605613, 1543969431, 4202751123, 368467651},
-                       {0,      0,          0,          0,          0,          30,         0,          0,          0,          0,          0,          0}};
-    G1_projective b = {{0,      0,          0,          100,        0,          0,          0,          0,          0,          0,          0,          0},
-                       {196605, 1980301312, 3289120770, 3958636555, 1405573306, 1598593111, 1884444485, 2010011731, 2723605613, 1543969431, 4202751123, 368467651},
-                       {0,      0,          0,          0,          0,          30,         0,          0,          0,          0,          0,          0}};
+    uint32_t a[36] = {0, 0, 0, 100, 0, 0, 0, 0, 0, 0, 0, 0, 196605, 1980301312, 3289120770, 3958636555, 1405573306,
+                      1598593111, 1884444485, 2010011731, 2723605613, 1543969431, 4202751123, 368467651, 0, 0, 0, 0, 0,
+                      30, 0, 0, 0, 0, 0, 0};
+    uint32_t b[36] = {0, 0, 0, 200, 0, 0, 0, 0, 0, 0, 0, 0, 196605, 1980301312, 3289120770, 3958636555, 1405573306,
+                      1598593111, 1884444485, 2010011731, 2723605613, 1543969431, 4202751123, 368467651, 0, 0, 0, 0, 0,
+                      40, 0, 0, 0, 0, 0, 0};
+    uint32_t cudaExpected[36] = {695163763, 838428337, 867136025, 3916970060, 1083605276, 2882035772, 3603006931,
+                                 2269309842, 422274527, 1169772790, 1990394245, 416975321, 1229022948, 3366429108,
+                                 670218974, 1658335027, 392632874, 1379067484, 798160530, 3656524164, 3793686573,
+                                 2144155088, 2721370348, 298035558, 413203031, 3318893592, 1282426328, 1145762026,
+                                 1542369093, 485346739, 1679000480, 4026228341, 2371190916, 3558967189, 3094593878,
+                                 414846589};
+
 
     G1_projective *a_d, *b_d, *result_d;
     G1_projective result;
@@ -1154,8 +1202,8 @@ int main() {
     hipMalloc(&result_d, size);
     check_hip_error();
 
-    hipMemcpy((void *) &a_d, (void *) &a, size, hipMemcpyHostToDevice);
-    hipMemcpy((void *) &b_d, (void *) &b, size, hipMemcpyHostToDevice);
+    hipMemcpy(a_d, a, size, hipMemcpyHostToDevice);
+    hipMemcpy(b_d, b, size, hipMemcpyHostToDevice);
     hipDeviceSynchronize();
     check_hip_error();
 
@@ -1168,22 +1216,18 @@ int main() {
     hipMemcpy(&result, result_d, size, hipMemcpyDeviceToHost);
     hipDeviceSynchronize();
     check_hip_error();
-    {
-        for(int i = 0;i<12;i++){
-            std::cout << result.x.val[i] <<", ";
-        }
-        std::cout<<std::endl;
-        for(int i = 0;i<12;i++){
-            std::cout << result.y.val[i] <<", ";
-        }
-        std::cout<<std::endl;
-        for(int i = 0;i<12;i++){
-            std::cout << result.z.val[i] <<", ";
-        }
-        std::cout<<std::endl<<std::endl;
-    }
-    check_hip_error();
+    print_G1_project(result);
 
+    //flattening result
+    uint32_t flattenResult[36];
+    memcpy(flattenResult,&result,size);
+
+    //assert cudaExpected vs result
+    for (int i = 0; i < 36; ++i) {
+        assert(flattenResult[i]==cudaExpected[i]);
+    }
+
+    printf("No error\n\n");
     hipFree(a_d);
     hipFree(b_d);
     hipFree(result_d);
