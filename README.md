@@ -6,19 +6,7 @@ The code comes from the Lotus project, which can be found at https://github.com/
 LICENSE-MIT and LICENSE-APACHE are two of the lotus licenses.
 
 ---
-The GPU code was extracted from the `bellperson` project, which is a `sub-project` of the Lotus project.
-In this code, I've removed all unnecessary code in order to test the `g1_add` function in HIP/ROCm.
-The GPU code can be found in `g1_add.cu` source.
 
-The main problem is that when we use optimization flags like `-O3`, the result differs
-significantly from when we use the `-O0` flag, This error will occur on two system with `gfx908` and `gfx900` gpus. The results are displayed below.
-(the optimization flags can be found in Makefile)
-
-I have also tested the code by cuda compiler and the result is the same with the `-O0` flag.
-
-### note
-Using the `[[clang::optnone]]` attribute for the `G1_add` function, we can see that the test results are correct even when compiled with O3 flag.
-This is not ideal, but you can test it in the `optnone` branch.
 
 ## Test1(gfx908)
 - gpu : gfx908

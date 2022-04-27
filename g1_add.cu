@@ -1104,6 +1104,7 @@ __device__ void print_G1(const char *name, G1_projective g1, const char *end) {
 }
 
 // http://www.hyperelliptic.org/EFD/g1p/auto-shortw-jacobian-0.html#addition-add-2007-bl
+[[clang::optnone]]
 DEVICE G1_projective G1_add(G1_projective a, G1_projective b) {
     // print_G1("a",a,"\n");
     // print_G1("b",b,"\n");
