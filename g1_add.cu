@@ -1185,12 +1185,15 @@ void normal_print(uint *in) {
 
 std::pair<std::string,bool> g1_add_test();
 
+std::pair<std::string,bool> g1_add_mixed_test();
+
 std::pair<std::string,bool> g1_double_test();
 
 int main() {
     std::vector<std::pair<std::string,bool>> results{
         g1_add_test(),
-        g1_double_test()
+        g1_double_test(),
+        g1_add_mixed_test()
     };
 
     for(int i = 0;i<results.size();++i){
@@ -1247,6 +1250,67 @@ std::pair<std::string,bool> g1_add_test(){
     //flattening result
     uint32_t flattenResult[36];
     memcpy(flattenResult,&result,size);
+
+    bool isFailed = false;
+    //assert cudaExpected vs result
+    for (int i = 0; i < 36; ++i) {
+        if(flattenResult[i]!=cudaExpected[i]){
+            isFailed = true;
+            break;
+        }
+    }
+
+    
+    hipFree(a_d);
+    hipFree(b_d);
+    hipFree(result_d);
+    return std::make_pair(testName,!isFailed);
+}
+
+std::pair<std::string,bool> g1_add_mixed_test(){
+    std::string testName = std::string(__FUNCTION__);
+    uint32_t a[36] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                     196605, 1980301312, 3289120770, 3958636555, 1405573306, 1598593111, 1884444485, 2010011731, 2723605613, 1543969431, 4202751123, 368467651,
+                      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+
+    uint32_t b[24] = {2210944813, 3909903087, 603786564, 3883152423, 2173389250, 2956470872, 809479795, 2862133481, 1088430826, 3104844840, 44451588, 226701902,
+                      2426309915, 1558163374, 4125809737, 2860931858, 1688959796, 3877074395, 4208292625, 4034170426, 2725679345, 1152044552, 819326913, 253933226};
+
+    uint32_t cudaExpected[36] = {2210944813, 3909903087, 603786564, 3883152423, 2173389250, 2956470872, 809479795, 2862133481, 1088430826, 3104844840, 44451588, 226701902,
+                                 2426309915, 1558163374, 4125809737, 2860931858, 1688959796, 3877074395, 4208292625, 4034170426, 2725679345, 1152044552, 819326913, 253933226,
+                                 196605, 1980301312, 3289120770, 3958636555, 1405573306, 1598593111, 1884444485, 2010011731, 2723605613, 1543969431, 4202751123, 368467651};
+
+
+    G1_projective *a_d, *result_d;
+    G1_affine *b_d;
+    G1_projective result;
+
+    auto size1 = sizeof(G1_projective);
+    auto affineSize = sizeof(G1_affine);
+    hipMalloc(&a_d, size1);
+    hipMalloc(&b_d, size1);
+    hipMalloc(&result_d, size1);
+    check_hip_error();
+
+    hipMemcpy(a_d, a, size1, hipMemcpyHostToDevice);
+    hipMemcpy(b_d, b, size1, hipMemcpyHostToDevice);
+    hipDeviceSynchronize();
+    check_hip_error();
+
+    hipLaunchKernelGGL(kernel_G1_add_mixed, dim3(1), dim3(1), 0, 0, a_d, b_d, result_d);
+
+    check_hip_error();
+    hipDeviceSynchronize();
+    check_hip_error();
+
+    hipMemcpy(&result, result_d, size1, hipMemcpyDeviceToHost);
+    hipDeviceSynchronize();
+    check_hip_error();
+    print_G1_project(testName,result);
+
+    //flattening result
+    uint32_t flattenResult[36];
+    memcpy(flattenResult,&result,size1);
 
     bool isFailed = false;
     //assert cudaExpected vs result
