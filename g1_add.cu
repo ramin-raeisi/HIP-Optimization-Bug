@@ -1,5 +1,5 @@
 #define __HIP_PLATFORM_AMD__
-
+#include <vector>
 #include "hip/hip_runtime.h"
 #include <stdint.h>
 #include <iostream>
@@ -1154,7 +1154,12 @@ KERNEL void kernel_G1_add(G1_projective *a, G1_projective *b, G1_projective *res
     *result = G1_add(*a, *b);
 }
 
-void print_G1_project(G1_projective in) {
+KERNEL void kernel_G1_double(G1_projective *inp, G1_projective *result) {
+  *result = G1_double(*inp);
+}
+
+void print_G1_project(std::string& functionName, G1_projective in) {
+    std::cout<<"-----"<<functionName<<std::endl;
     std::cout << "x: ";
     for (int i = 0; i < 12; i++) {
         std::cout << in.x.val[i] << ", ";
@@ -1178,8 +1183,27 @@ void normal_print(uint *in) {
     }
 }
 
+std::pair<std::string,bool> g1_add_test();
+
+std::pair<std::string,bool> g1_double_test();
+
 int main() {
-    uint32_t a[36] = {0, 0, 0, 100, 0, 0, 0, 0, 0, 0, 0, 0, 196605, 1980301312, 3289120770, 3958636555, 1405573306,
+    std::vector<std::pair<std::string,bool>> results{
+        g1_add_test(),
+        g1_double_test()
+    };
+
+    for(int i = 0;i<results.size();++i){
+        std::string result = results[i].second==true ? " success" : " failed";
+        std::cout<<results[i].first<<"->" << result<<std::endl;
+    }
+}
+
+
+
+std::pair<std::string,bool> g1_add_test(){
+    std::string testName = std::string(__FUNCTION__);
+        uint32_t a[36] = {0, 0, 0, 100, 0, 0, 0, 0, 0, 0, 0, 0, 196605, 1980301312, 3289120770, 3958636555, 1405573306,
                       1598593111, 1884444485, 2010011731, 2723605613, 1543969431, 4202751123, 368467651, 0, 0, 0, 0, 0,
                       30, 0, 0, 0, 0, 0, 0};
 
@@ -1218,19 +1242,79 @@ int main() {
     hipMemcpy(&result, result_d, size, hipMemcpyDeviceToHost);
     hipDeviceSynchronize();
     check_hip_error();
-    print_G1_project(result);
+    print_G1_project(testName,result);
 
     //flattening result
     uint32_t flattenResult[36];
     memcpy(flattenResult,&result,size);
 
+    bool isFailed = false;
     //assert cudaExpected vs result
     for (int i = 0; i < 36; ++i) {
-        assert(flattenResult[i]==cudaExpected[i]);
+        if(flattenResult[i]!=cudaExpected[i]){
+            isFailed = true;
+            break;
+        }
     }
 
-    printf("No error\n\n");
+    
     hipFree(a_d);
     hipFree(b_d);
     hipFree(result_d);
+    return std::make_pair(testName,!isFailed);
+}
+
+std::pair<std::string,bool> g1_double_test(){
+    std::string testName = std::string(__FUNCTION__);
+        uint32_t a[36] = {572937709, 634652010, 3871286275, 3864143588, 3783419037, 150171507, 338481781, 1762702506, 3587247022, 3607080343,
+                         1065596025, 105422392, 4163356661, 4145517797, 1249234384, 623445957, 2245986326, 1226801719, 3402539388, 2329718207,
+                          1753974020, 2306590889, 1058907861, 340553794, 3700610293, 2964612715, 139187554, 805771328, 464361029, 96907019,
+                           1219116302, 2937647693, 1150263207, 4076011880, 1150866722, 228241594};
+
+    uint32_t cudaExpected[36] = {1632659750, 1265485755, 1750545604, 4265521061, 3934928281, 4157162780, 4059373350, 175259380,
+     1116337943, 828144285, 4015370401, 394235955, 1337058212, 2000076061, 4167958530, 3201785366, 190644621, 1217337187, 1281056040,
+      2380457106, 1843262342, 2768612874, 1950340553, 89436721, 459531309, 2907844289, 4049224835, 4075394049, 4006033233, 2142954301,
+       1167773149, 2944676389, 2627347026, 2069553728, 951579129, 432622738};
+
+
+    G1_projective *a_d, *result_d;
+    G1_projective result;
+
+    auto size = sizeof(G1_projective);
+    hipMalloc(&a_d, size);
+    hipMalloc(&result_d, size);
+    check_hip_error();
+
+    hipMemcpy(a_d, a, size, hipMemcpyHostToDevice);
+    hipDeviceSynchronize();
+    check_hip_error();
+
+    hipLaunchKernelGGL(kernel_G1_double, dim3(1), dim3(1), 0, 0, a_d, result_d);
+
+    check_hip_error();
+    hipDeviceSynchronize();
+    check_hip_error();
+
+    hipMemcpy(&result, result_d, size, hipMemcpyDeviceToHost);
+    hipDeviceSynchronize();
+    check_hip_error();
+    print_G1_project(testName,result);
+
+    //flattening result
+    uint32_t flattenResult[36];
+    memcpy(flattenResult,&result,size);
+
+    bool isFailed = false;
+    //assert cudaExpected vs result
+    for (int i = 0; i < 36; ++i) {
+        if(flattenResult[i]!=cudaExpected[i]){
+            isFailed = true;
+            break;
+        }
+    }
+
+    
+    hipFree(a_d);
+    hipFree(result_d);
+    return std::make_pair(testName,!isFailed);
 }
