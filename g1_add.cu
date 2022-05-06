@@ -997,6 +997,66 @@ DEVICE Fq Fq_double(Fq a) {
     return a;
 }
 
+#define Fq2_LIMB_BITS Fq_LIMB_BITS
+#define Fq2_ZERO ((Fq2){Fq_ZERO, Fq_ZERO})
+#define Fq2_ONE ((Fq2){Fq_ONE, Fq_ZERO})
+
+typedef struct {
+  Fq c0;
+  Fq c1;
+} Fq2; // Represents: c0 + u * c1
+
+DEVICE bool Fq2_eq(Fq2 a, Fq2 b) {
+  return Fq_eq(a.c0, b.c0) && Fq_eq(a.c1, b.c1);
+}
+DEVICE Fq2 Fq2_sub(Fq2 a, Fq2 b) {
+  a.c0 = Fq_sub(a.c0, b.c0);
+  a.c1 = Fq_sub(a.c1, b.c1);
+  return a;
+}
+DEVICE Fq2 Fq2_add(Fq2 a, Fq2 b) {
+  a.c0 = Fq_add(a.c0, b.c0);
+  a.c1 = Fq_add(a.c1, b.c1);
+  return a;
+}
+DEVICE Fq2 Fq2_double(Fq2 a) {
+  a.c0 = Fq_double(a.c0);
+  a.c1 = Fq_double(a.c1);
+  return a;
+}
+
+/*
+ * (a_0 + u * a_1)(b_0 + u * b_1) = a_0 * b_0 - a_1 * b_1 + u * (a_0 * b_1 + a_1 * b_0)
+ * Therefore:
+ * c_0 = a_0 * b_0 - a_1 * b_1
+ * c_1 = (a_0 * b_1 + a_1 * b_0) = (a_0 + a_1) * (b_0 + b_1) - a_0 * b_0 - a_1 * b_1
+ */
+DEVICE Fq2 Fq2_mul(Fq2 a, Fq2 b) {
+  const Fq aa = Fq_mul(a.c0, b.c0);
+  const Fq bb = Fq_mul(a.c1, b.c1);
+  const Fq o = Fq_add(b.c0, b.c1);
+  a.c1 = Fq_add(a.c1, a.c0);
+  a.c1 = Fq_mul(a.c1, o);
+  a.c1 = Fq_sub(a.c1, aa);
+  a.c1 = Fq_sub(a.c1, bb);
+  a.c0 = Fq_sub(aa, bb);
+  return a;
+}
+
+/*
+ * (a_0 + u * a_1)(a_0 + u * a_1) = a_0 ^ 2 - a_1 ^ 2 + u * 2 * a_0 * a_1
+ * Therefore:
+ * c_0 = (a_0 * a_0 - a_1 * a_1) = (a_0 + a_1)(a_0 - a_1)
+ * c_1 = 2 * a_0 * a_1
+ */
+DEVICE Fq2 Fq2_sqr(Fq2 a) {
+  const Fq ab = Fq_mul(a.c0, a.c1);
+  const Fq c0c1 = Fq_add(a.c0, a.c1);
+  a.c0 = Fq_mul(Fq_sub(a.c0, a.c1), c0c1);
+  a.c1 = Fq_double(ab);
+  return a;
+}
+
 
 // Elliptic curve operations (Short Weierstrass Jacobian form)
 
@@ -1088,6 +1148,126 @@ DEVICE G1_projective G1_add_mixed(G1_projective a, G1_affine b) {
     return ret;
 }
 
+#define G2_ZERO ((G2_projective){Fq2_ZERO, Fq2_ONE, Fq2_ZERO})
+
+typedef struct {
+  Fq2 x;
+  Fq2 y;
+} G2_affine;
+
+typedef struct {
+  Fq2 x;
+  Fq2 y;
+  Fq2 z;
+} G2_projective;
+
+// http://www.hyperelliptic.org/EFD/g1p/auto-shortw-jacobian-0.html#doubling-dbl-2009-l
+DEVICE G2_projective G2_double(G2_projective inp) {
+  const Fq2 local_zero = Fq2_ZERO;
+  if(Fq2_eq(inp.z, local_zero)) {
+      return inp;
+  }
+
+  const Fq2 a = Fq2_sqr(inp.x); // A = X1^2
+  const Fq2 b = Fq2_sqr(inp.y); // B = Y1^2
+  Fq2 c = Fq2_sqr(b); // C = B^2
+
+  // D = 2*((X1+B)2-A-C)
+  Fq2 d = Fq2_add(inp.x, b);
+  d = Fq2_sqr(d); d = Fq2_sub(Fq2_sub(d, a), c); d = Fq2_double(d);
+
+  const Fq2 e = Fq2_add(Fq2_double(a), a); // E = 3*A
+  const Fq2 f = Fq2_sqr(e);
+
+  inp.z = Fq2_mul(inp.y, inp.z); inp.z = Fq2_double(inp.z); // Z3 = 2*Y1*Z1
+  inp.x = Fq2_sub(Fq2_sub(f, d), d); // X3 = F-2*D
+
+  // Y3 = E*(D-X3)-8*C
+  c = Fq2_double(c); c = Fq2_double(c); c = Fq2_double(c);
+  inp.y = Fq2_sub(Fq2_mul(Fq2_sub(d, inp.x), e), c);
+
+  return inp;
+}
+
+// http://www.hyperelliptic.org/EFD/g1p/auto-shortw-jacobian-0.html#addition-madd-2007-bl
+DEVICE G2_projective G2_add_mixed(G2_projective a, G2_affine b) {
+  const Fq2 local_zero = Fq2_ZERO;
+  if(Fq2_eq(a.z, local_zero)) {
+    const Fq2 local_one = Fq2_ONE;
+    a.x = b.x;
+    a.y = b.y;
+    a.z = local_one;
+    return a;
+  }
+
+  const Fq2 z1z1 = Fq2_sqr(a.z);
+  const Fq2 u2 = Fq2_mul(b.x, z1z1);
+  const Fq2 s2 = Fq2_mul(Fq2_mul(b.y, a.z), z1z1);
+
+  if(Fq2_eq(a.x, u2) && Fq2_eq(a.y, s2)) {
+      return G2_double(a);
+  }
+
+  const Fq2 h = Fq2_sub(u2, a.x); // H = U2-X1
+  const Fq2 hh = Fq2_sqr(h); // HH = H^2
+  Fq2 i = Fq2_double(hh); i = Fq2_double(i); // I = 4*HH
+  Fq2 j = Fq2_mul(h, i); // J = H*I
+  Fq2 r = Fq2_sub(s2, a.y); r = Fq2_double(r); // r = 2*(S2-Y1)
+  const Fq2 v = Fq2_mul(a.x, i);
+
+  G2_projective ret;
+
+  // X3 = r^2 - J - 2*V
+  ret.x = Fq2_sub(Fq2_sub(Fq2_sqr(r), j), Fq2_double(v));
+
+  // Y3 = r*(V-X3)-2*Y1*J
+  j = Fq2_mul(a.y, j); j = Fq2_double(j);
+  ret.y = Fq2_sub(Fq2_mul(Fq2_sub(v, ret.x), r), j);
+
+  // Z3 = (Z1+H)^2-Z1Z1-HH
+  ret.z = Fq2_add(a.z, h); ret.z = Fq2_sub(Fq2_sub(Fq2_sqr(ret.z), z1z1), hh);
+  return ret;
+}
+
+// http://www.hyperelliptic.org/EFD/g1p/auto-shortw-jacobian-0.html#addition-add-2007-bl
+DEVICE G2_projective G2_add(G2_projective a, G2_projective b) {
+
+  const Fq2 local_zero = Fq2_ZERO;
+  if(Fq2_eq(a.z, local_zero)) return b;
+  if(Fq2_eq(b.z, local_zero)) return a;
+
+  const Fq2 z1z1 = Fq2_sqr(a.z); // Z1Z1 = Z1^2
+  const Fq2 z2z2 = Fq2_sqr(b.z); // Z2Z2 = Z2^2
+  const Fq2 u1 = Fq2_mul(a.x, z2z2); // U1 = X1*Z2Z2
+  const Fq2 u2 = Fq2_mul(b.x, z1z1); // U2 = X2*Z1Z1
+  Fq2 s1 = Fq2_mul(Fq2_mul(a.y, b.z), z2z2); // S1 = Y1*Z2*Z2Z2
+  const Fq2 s2 = Fq2_mul(Fq2_mul(b.y, a.z), z1z1); // S2 = Y2*Z1*Z1Z1
+
+  if(Fq2_eq(u1, u2) && Fq2_eq(s1, s2))
+    return G2_double(a);
+  else {
+    const Fq2 h = Fq2_sub(u2, u1); // H = U2-U1
+    Fq2 i = Fq2_double(h); i = Fq2_sqr(i); // I = (2*H)^2
+    const Fq2 j = Fq2_mul(h, i); // J = H*I
+    Fq2 r = Fq2_sub(s2, s1); r = Fq2_double(r); // r = 2*(S2-S1)
+    const Fq2 v = Fq2_mul(u1, i); // V = U1*I
+    a.x = Fq2_sub(Fq2_sub(Fq2_sub(Fq2_sqr(r), j), v), v); // X3 = r^2 - J - 2*V
+
+    // Y3 = r*(V - X3) - 2*S1*J
+    a.y = Fq2_mul(Fq2_sub(v, a.x), r);
+    s1 = Fq2_mul(s1, j); s1 = Fq2_double(s1); // S1 = S1 * J * 2
+    a.y = Fq2_sub(a.y, s1);
+
+    // Z3 = ((Z1+Z2)^2 - Z1Z1 - Z2Z2)*H
+    a.z = Fq2_add(a.z, b.z); a.z = Fq2_sqr(a.z);
+    a.z = Fq2_sub(Fq2_sub(a.z, z1z1), z2z2);
+    a.z = Fq2_mul(a.z, h);
+
+    return a;
+  }
+}
+
+
 __device__ void print_Fq(const char *name, Fq in, const char *end) {
     printf("%s=>", name);
     for (int i = 0; i < Fq_LIMBS; i++) {
@@ -1158,6 +1338,18 @@ KERNEL void kernel_G1_double(G1_projective *inp, G1_projective *result) {
   *result = G1_double(*inp);
 }
 
+KERNEL void kernel_G2_double(G2_projective *inp, G2_projective *result) {
+  *result = G2_double(*inp);
+}
+
+KERNEL void kernel_G2_add_mixed(G2_projective *a, G2_affine *b, G2_projective *result) {
+  *result = G2_add_mixed(*a, *b);
+}
+
+KERNEL void kernel_G2_add(G2_projective *a, G2_projective *b, G2_projective *result) {
+  *result = G2_add(*a, *b);
+}
+
 void print_G1_project(std::string& functionName, G1_projective in) {
     std::cout<<"-----"<<functionName<<std::endl;
     std::cout << "x: ";
@@ -1177,6 +1369,25 @@ void print_G1_project(std::string& functionName, G1_projective in) {
     std::cout << std::endl << std::endl;
 }
 
+void print_G2_project(std::string& functionName, G2_projective in) {
+    std::cout<<"-----"<<functionName<<std::endl;
+    std::cout << "x: ";
+    for (int i = 0; i < 12; i++) {
+        std::cout << in.x.c0.val[i] << ", ";
+    }
+    std::cout << std::endl;
+    std::cout << "y: ";
+    for (int i = 0; i < 12; i++) {
+        std::cout << in.y.c0.val[i] << ", ";
+    }
+    std::cout << std::endl;
+    std::cout << "z: ";
+    for (int i = 0; i < 12; i++) {
+        std::cout << in.z.c0.val[i] << ", ";
+    }
+    std::cout << std::endl << std::endl;
+}
+
 void normal_print(uint *in) {
     for (int i = 0; i < 36; i++) {
         std::cout << in[i] << ", ";
@@ -1189,11 +1400,14 @@ std::pair<std::string,bool> g1_add_mixed_test();
 
 std::pair<std::string,bool> g1_double_test();
 
+std::pair<std::string,bool> g2_add_test();
+
 int main() {
     std::vector<std::pair<std::string,bool>> results{
         g1_add_test(),
         g1_double_test(),
-        g1_add_mixed_test()
+        g1_add_mixed_test(),
+        g2_add_test()
     };
 
     for(int i = 0;i<results.size();++i){
@@ -1379,6 +1593,69 @@ std::pair<std::string,bool> g1_double_test(){
 
     
     hipFree(a_d);
+    hipFree(result_d);
+    return std::make_pair(testName,!isFailed);
+}
+
+std::pair<std::string,bool> g2_add_test(){
+    std::string testName = std::string(__FUNCTION__);
+        uint32_t a[72] = {0, 0, 0, 100, 0, 0, 0, 0, 0, 0, 0, 0, 196605, 1980301312, 3289120770, 3958636555, 1405573306, 1598593111, 1884444485, 2010011731, 2723605613, 1543969431, 4202751123, 368467651, 0, 0, 0, 0, 0, 30, 0, 0, 0, 0, 0, 0,
+                               0, 0, 0, 100, 0, 0, 0, 0, 0, 0, 0, 0, 196605, 1980301312, 3289120770, 3958636555, 1405573306, 1598593111, 1884444485, 2010011731, 2723605613, 1543969431, 4202751123, 368467651, 0, 0, 0, 0, 0, 30, 0, 0, 0, 0, 0, 0};
+
+    uint32_t b[72] = {0, 0, 0, 200, 0, 0, 0, 0, 0, 0, 0, 0, 196605, 1980301312, 3289120770, 3958636555, 1405573306, 1598593111, 1884444485, 2010011731, 2723605613, 1543969431, 4202751123, 368467651, 0, 0, 0, 0, 0, 40, 0, 0, 0, 0, 0, 0,
+                               0, 0, 0, 200, 0, 0, 0, 0, 0, 0, 0, 0, 196605, 1980301312, 3289120770, 3958636555, 1405573306, 1598593111, 1884444485, 2010011731, 2723605613, 1543969431, 4202751123, 368467651, 0, 0, 0, 0, 0, 40, 0, 0, 0, 0, 0, 0};
+
+    uint32_t cudaExpected[72] = {208598400, 2694991227, 1047077762, 2846011457, 3072180666, 2586524079, 1102481180, 2748217909, 915908624, 1428853440,
+                                 185053769, 280202458, 896785299, 3995963242, 1823751211, 767703503, 1304145148, 662952197, 2882865842, 534777519,
+                                 1901401509, 1872043708, 2798653961, 293640618, 3539470131, 2137220391, 1597398656, 1117125724, 730634957, 1078887918,
+                                 1321721234, 1724952331, 613546324, 2748204274, 2525111799, 289271208,3887607577, 2510766255, 737788432, 3570942326,
+                                 2879936206, 962108494, 3792765839, 2585296344, 1640276112, 2758685254, 2846912960, 355409566, 532666578, 2246343696,
+                                 2174845458, 1995569759, 1202232624, 3706636086, 748146386, 2090841127, 1842967206, 618837610, 1931725633, 318850490,
+                                 519291090, 1999124522, 2412840922, 2084572850, 1743581217, 2719486829, 567872724, 45755210, 2616696815, 3919313717,
+                                 4275453181, 15054798};
+
+
+    G2_projective *a_d, *b_d, *result_d;
+    G2_projective result;
+
+    auto size = sizeof(G2_projective);
+    hipMalloc(&a_d, size);
+    hipMalloc(&b_d, size);
+    hipMalloc(&result_d, size);
+    check_hip_error();
+
+    hipMemcpy(a_d, a, size, hipMemcpyHostToDevice);
+    hipMemcpy(b_d, b, size, hipMemcpyHostToDevice);
+    hipDeviceSynchronize();
+    check_hip_error();
+
+    hipLaunchKernelGGL(kernel_G2_add, dim3(1), dim3(1), 0, 0, a_d, b_d, result_d);
+
+    check_hip_error();
+    hipDeviceSynchronize();
+    check_hip_error();
+
+    hipMemcpy(&result, result_d, size, hipMemcpyDeviceToHost);
+    hipDeviceSynchronize();
+    check_hip_error();
+    print_G2_project(testName,result);
+
+    //flattening result
+    uint32_t flattenResult[36];
+    memcpy(flattenResult,&result,size);
+
+    bool isFailed = false;
+    //assert cudaExpected vs result
+    for (int i = 0; i < 72; ++i) {
+        if(flattenResult[i]!=cudaExpected[i]){
+            isFailed = true;
+            break;
+        }
+    }
+
+    
+    hipFree(a_d);
+    hipFree(b_d);
     hipFree(result_d);
     return std::make_pair(testName,!isFailed);
 }
