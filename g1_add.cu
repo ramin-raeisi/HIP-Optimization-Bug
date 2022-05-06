@@ -46,53 +46,6 @@ typedef unsigned char uchar;
 #define AMD
 #endif
 
-// Returns a + b, puts the carry in b
-DEVICE ulong add_with_carry_64(ulong a, ulong *b) {
-    ulong lo;
-    uint32_t a_low = a;
-    uint32_t b_low = *b;
-    uint32_t add_low, add_high, temp;
-    asm volatile("v_add_u32 %0, %1, %2;" : "+v"(add_low) : "v"(a_low), "v"(b_low));
-    uint32_t a_high = a >> 32;
-    uint32_t b_high = (*b) >> 32;
-    asm volatile("v_addc_co_u32 %0, vcc, %1, %2, vcc;" : "+v"(add_high) : "v"(a_high), "v"(b_high): "vcc");
-    asm volatile("v_addc_co_u32 %0, vcc, 0, 0, vcc;" : "+v"(temp)::"vcc");
-    *b = temp;
-    lo = add_high;
-    lo = lo << 32;
-    lo = lo + add_low;
-    return lo;
-}
-
-// Returns a * b + c + d, puts the carry in d
-DEVICE ulong mac_with_carry_64(ulong a, ulong b, ulong c, ulong *d) {
-    ulong lo;
-    uint32_t a_lo, a_hi, b_lo, b_hi, c_lo, c_hi;
-    a_lo = a;
-    a_hi = a >> 32;
-    b_lo = b;
-    b_hi = b >> 32;
-    c_lo = c;
-    c_hi = c >> 32;
-
-    uint32_t temp;
-    uint32_t temp_carry;
-    asm volatile("v_mul_lo_u32 %0, %1, %2;" : "+v"(temp): "v"(a_lo), "v"(b_lo));
-    lo = temp;
-
-    asm volatile("v_mul_lo_u32 %0, %1, %2;" : "+v"(temp): "v"(a_hi), "v"(b_lo));
-    ulong res_temp1 = temp;
-    asm volatile("v_mul_lo_u32 %0, %1, %2;" : "+v"(temp): "v"(a_lo), "v"(b_hi));
-    ulong res_temp2 = temp;
-    lo = add_with_carry_64(res_temp1, &res_temp2);
-    lo = lo << 32;
-    lo = add_with_carry_64(lo, &res_temp2);
-
-    asm volatile("v_addc_co_u32 %0, vcc, 0, 0, vcc;" : "+v"(temp)::"vcc");
-    *d = temp;
-    return lo;
-}
-
 // Returns a * b + c + d, puts the carry in d
 DEVICE uint mac_with_carry_32(uint a, uint b, uint c, uint *d) {
     ulong res = (ulong) a * b + c + *d;
@@ -103,8 +56,10 @@ DEVICE uint mac_with_carry_32(uint a, uint b, uint c, uint *d) {
 // Returns a + b, puts the carry in b
 DEVICE uint add_with_carry_32(uint a, uint *b) {
     uint lo, hi;
-    asm volatile("v_add_u32 %0, %1, %2;" : "+v"(lo): "v"(a), "v"(*b));
+    asm volatile("v_add_co_u32 %0, vcc, %1, %2;" : "+v"(lo): "v"(a), "v"(*b): "vcc");
     asm volatile("v_addc_co_u32 %0, vcc, 0, 0, vcc;" : "+v"(hi)::"vcc");
+    // asm volatile("v_add_co_u32 %0, vcc, %0, %1" : "+v"(hi): "v"(0) : "vcc");
+    asm volatile("v_add_co_u32 %0, vcc, %0, 0" : "+v"(hi) : : "vcc");
     *b = hi;
     return lo;
 }
@@ -114,9 +69,9 @@ typedef int int32_t;
 typedef uint limb;
 
 DEVICE inline uint32_t add_cc(uint32_t a, uint32_t b) {
-    uint32_t r;
-    asm volatile("v_add_co_u32 %0, %1, %2" : "+v"(r): "v"(a), "v"(b));
-    return r;
+  uint32_t r;
+  asm volatile("v_add_co_u32 %0, vcc, %1, %2" : "+v"(r): "v"(a), "v"(b) : "vcc");
+  return r;
 }
 
 DEVICE inline uint32_t addc_cc(uint32_t a, uint32_t b) {
@@ -129,24 +84,15 @@ DEVICE inline uint32_t addc(uint32_t a, uint32_t b) {
     uint32_t r;
     asm volatile("v_addc_co_u32 %0, vcc, %1, %2, vcc;" : "+v"(r): "v"(a), "v"(b): "vcc");
     //To reset carry
-    asm volatile("v_add_co_u32 %0, %0, %1;" : "+v"(r) : "v"(0));
-    return r;
-}
-
-
-DEVICE inline uint32_t madlo(uint32_t a, uint32_t b, uint32_t c) {
-    //RR TODO:
-    //Not used anywhere??????????
-    uint32_t r;
-    asm volatile("v_mul_lo_u32 %0, %1, %2" : "+v"(r): "v"(a), "v"(b));
-    asm volatile("v_add_co_u32 %0, %0, %1" : "+v"(r): "v"(c));
+    // asm volatile("v_add_co_u32 %0, vcc, %0, %1;" : "+v"(r) : "v"(0) : "vcc");
+    asm volatile("v_add_co_u32 %0, vcc, %0, 0;" : "+v"(r) : : "vcc");
     return r;
 }
 
 DEVICE inline uint32_t madlo_cc(uint32_t a, uint32_t b, uint32_t c) {
     uint32_t r;
     asm volatile("v_mul_lo_u32 %0, %1, %2" : "+v"(r): "v"(a), "v"(b));
-    asm volatile("v_add_co_u32 %0, %0, %1" : "+v"(r): "v"(c));
+    asm volatile("v_add_co_u32 %0, vcc, %0, %1" : "+v"(r): "v"(c) : "vcc");
     return r;
 }
 
@@ -157,28 +103,10 @@ DEVICE inline uint32_t madloc_cc(uint32_t a, uint32_t b, uint32_t c) {
     return r;
 }
 
-DEVICE inline uint32_t madloc(uint32_t a, uint32_t b, uint32_t c) {
-    //RR TODO:
-    //Not used anywhere??????????
-    uint32_t r;
-    asm volatile("v_mul_lo_u32 %0, %1, %2" : "+v"(r): "v"(a), "v"(b));
-    asm volatile("v_addc_co_u32 %0, vcc, %0, %1, vcc" : "+v"(r): "v"(c): "vcc");
-    return r;
-}
-
-DEVICE inline uint32_t madhi(uint32_t a, uint32_t b, uint32_t c) {
-    //RR TODO:
-    //Not used anywhere??????????
-    uint32_t r;
-    asm volatile("v_mul_hi_u32 %0, %1, %2" : "+v"(r): "v"(a), "v"(b));
-    asm volatile("v_add_u32 %0, %0, %1" : "+v"(r): "v"(c));
-    return r;
-}
-
 DEVICE inline uint32_t madhi_cc(uint32_t a, uint32_t b, uint32_t c) {
     uint32_t r;
     asm volatile("v_mul_hi_u32 %0, %1, %2" : "+v"(r): "v"(a), "v"(b));
-    asm volatile("v_add_co_u32 %0, %0, %1" : "+v"(r): "v"(c));
+    asm volatile("v_add_co_u32 %0, vcc, %0, %1" : "+v"(r): "v"(c) : "vcc");
     return r;
 }
 
@@ -194,7 +122,8 @@ DEVICE inline uint32_t madhic(uint32_t a, uint32_t b, uint32_t c) {
     asm volatile("v_mul_hi_u32 %0, %1, %2" : "+v"(r): "v"(a), "v"(b));
     asm volatile("v_addc_co_u32 %0, vcc, %0, %1, vcc" : "+v"(r): "v"(c): "vcc");
     //To reset carry
-    asm volatile("v_add_co_u32 %0, %0, %1" : "+v"(r): "v"(0));
+    // asm volatile("v_add_co_u32 %0, vcc, %0, %1" : "+v"(r): "v"(0) : "vcc");
+    asm volatile("v_add_co_u32 %0, vcc, %0, 0" : "+v"(r) : : "vcc");
     return r;
 }
 
@@ -257,7 +186,7 @@ CONSTANT Fr Fr_R2 = {{4092763245, 3382307216, 2274516003, 728559051, 1918122383,
 CONSTANT Fr Fr_ZERO = {{0, 0, 0, 0, 0, 0, 0, 0}};
 
 DEVICE Fr Fr_sub_nvidia(Fr a, Fr b) {
-    asm volatile("v_sub_co_u32 %0, %0, %1" : "+v"(a.val[0]): "v"(b.val[0]));
+    asm volatile("v_sub_co_u32 %0, vcc, %0, %1" : "+v"(a.val[0]): "v"(b.val[0]) : "vcc");
     asm volatile("v_subb_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[1]): "v"(b.val[1]): "vcc");
     asm volatile("v_subb_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[2]): "v"(b.val[2]): "vcc");
     asm volatile("v_subb_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[3]): "v"(b.val[3]): "vcc");
@@ -265,12 +194,13 @@ DEVICE Fr Fr_sub_nvidia(Fr a, Fr b) {
     asm volatile("v_subb_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[5]): "v"(b.val[5]): "vcc");
     asm volatile("v_subb_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[6]): "v"(b.val[6]): "vcc");
     asm volatile("v_subb_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[7]): "v"(b.val[7]): "vcc");
-    asm volatile("v_sub_co_u32 %0, %0, %1" : "+v"(a.val[7]): "v"(0));
+    // asm volatile("v_sub_co_u32 %0, vcc, %0, %1" : "+v"(a.val[7]): "v"(0) : "vcc");
+    asm volatile("v_sub_co_u32 %0, vcc, %0, 0" : "+v"(a.val[7]): : "vcc");
     return a;
 }
 
 DEVICE Fr Fr_add_nvidia(Fr a, Fr b) {
-    asm volatile("v_add_co_u32 %0, %0, %1" : "+v"(a.val[0]): "v"(b.val[0]));
+    asm volatile("v_add_co_u32 %0, vcc, %0, %1" : "+v"(a.val[0]): "v"(b.val[0]) : "vcc");
     asm volatile("v_addc_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[1]): "v"(b.val[1]): "vcc");
     asm volatile("v_addc_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[2]): "v"(b.val[2]): "vcc");
     asm volatile("v_addc_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[3]): "v"(b.val[3]): "vcc");
@@ -278,7 +208,8 @@ DEVICE Fr Fr_add_nvidia(Fr a, Fr b) {
     asm volatile("v_addc_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[5]): "v"(b.val[5]): "vcc");
     asm volatile("v_addc_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[6]): "v"(b.val[6]): "vcc");
     asm volatile("v_addc_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[7]): "v"(b.val[7]): "vcc");
-    asm volatile("v_add_co_u32 %0, %0, %1" : "+v"(a.val[7]): "v"(0));
+    // asm volatile("v_add_co_u32 %0, vcc, %0, %1" : "+v"(a.val[7]): "v"(0) : "vcc");
+    asm volatile("v_add_co_u32 %0, vcc, %0, 0" : "+v"(a.val[7]): : "vcc");
     return a;
 }
 
@@ -297,7 +228,6 @@ DEVICE Fr Fr_add_nvidia(Fr a, Fr b) {
 // Greater than or equal
 DEVICE bool Fr_gte(Fr a, Fr b) {
     for (char i = Fr_LIMBS - 1; i >= 0; i--) {
-        //RR TODO: Recheck logic
         if (a.val[i] > b.val[i])
             return true;
         if (a.val[i] < b.val[i])
@@ -663,7 +593,7 @@ CONSTANT Fq Fq_ZERO = {{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}};
 
 
 DEVICE Fq Fq_sub_nvidia(Fq a, Fq b) {
-    asm volatile("v_sub_co_u32 %0, %0, %1" : "+v"(a.val[0]): "v"(b.val[0]));
+    asm volatile("v_sub_co_u32 %0, vcc, %0, %1" : "+v"(a.val[0]): "v"(b.val[0]) : "vcc");
     asm volatile("v_subb_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[1]): "v"(b.val[1]): "vcc");
     asm volatile("v_subb_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[2]): "v"(b.val[2]): "vcc");
     asm volatile("v_subb_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[3]): "v"(b.val[3]): "vcc");
@@ -675,12 +605,13 @@ DEVICE Fq Fq_sub_nvidia(Fq a, Fq b) {
     asm volatile("v_subb_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[9]): "v"(b.val[9]): "vcc");
     asm volatile("v_subb_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[10]): "v"(b.val[10]): "vcc");
     asm volatile("v_subb_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[11]): "v"(b.val[11]): "vcc");
-    asm volatile("v_sub_co_u32 %0, %0, %1" : "+v"(a.val[11]): "v"(0));
+    // asm volatile("v_sub_co_u32 %0, vcc, %0, %1" : "+v"(a.val[11]): "v"(0) : "vcc");
+    asm volatile("v_sub_co_u32 %0, vcc, %0, 0" : "+v"(a.val[11]): : "vcc");
     return a;
 }
 
 DEVICE Fq Fq_add_nvidia(Fq a, Fq b) {
-    asm volatile("v_add_co_u32 %0, %0, %1" : "+v"(a.val[0]): "v"(b.val[0]));
+    asm volatile("v_add_co_u32 %0, vcc, %0, %1" : "+v"(a.val[0]): "v"(b.val[0]) : "vcc");
     asm volatile("v_addc_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[1]): "v"(b.val[1]): "vcc");
     asm volatile("v_addc_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[2]): "v"(b.val[2]): "vcc");
     asm volatile("v_addc_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[3]): "v"(b.val[3]): "vcc");
@@ -692,7 +623,8 @@ DEVICE Fq Fq_add_nvidia(Fq a, Fq b) {
     asm volatile("v_addc_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[9]): "v"(b.val[9]): "vcc");
     asm volatile("v_addc_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[10]): "v"(b.val[10]): "vcc");
     asm volatile("v_addc_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[11]): "v"(b.val[11]): "vcc");
-    asm volatile("v_add_co_u32 %0, %0, %1" : "+v"(a.val[11]): "v"(0));
+    // asm volatile("v_add_co_u32 %0, vcc, %0, %1" : "+v"(a.val[11]): "v"(0) : "vcc");
+    asm volatile("v_add_co_u32 %0, vcc, %0, 0" : "+v"(a.val[11]): : "vcc");
     return a;
 }
 
@@ -711,7 +643,6 @@ DEVICE Fq Fq_add_nvidia(Fq a, Fq b) {
 // Greater than or equal
 DEVICE bool Fq_gte(Fq a, Fq b) {
     for (char i = Fq_LIMBS - 1; i >= 0; i--) {
-        //RR TODO: Recheck logic
         if (a.val[i] > b.val[i])
             return true;
         if (a.val[i] < b.val[i])
