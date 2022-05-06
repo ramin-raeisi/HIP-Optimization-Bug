@@ -1351,7 +1351,7 @@ KERNEL void kernel_G2_add(G2_projective *a, G2_projective *b, G2_projective *res
 }
 
 void print_G1_project(std::string& functionName, G1_projective in) {
-    std::cout<<"-----"<<functionName<<std::endl;
+    std::cout<<"-----"<<functionName<<"--------"<<std::endl;
     std::cout << "x: ";
     for (int i = 0; i < 12; i++) {
         std::cout << in.x.val[i] << ", ";
@@ -1370,20 +1370,38 @@ void print_G1_project(std::string& functionName, G1_projective in) {
 }
 
 void print_G2_project(std::string& functionName, G2_projective in) {
-    std::cout<<"-----"<<functionName<<std::endl;
-    std::cout << "x: ";
+    std::cout<<"-----"<<functionName<<"--------"<<std::endl;
+    std::cout << "x: "<<std::endl;
+    std::cout << "  c0: ";
     for (int i = 0; i < 12; i++) {
         std::cout << in.x.c0.val[i] << ", ";
     }
     std::cout << std::endl;
-    std::cout << "y: ";
+    std::cout << "  c1: ";
+    for (int i = 0; i < 12; i++) {
+        std::cout << in.x.c1.val[i] << ", ";
+    }
+    std::cout << std::endl;
+    std::cout << "y: "<<std::endl;
+    std::cout << "  c0: ";
     for (int i = 0; i < 12; i++) {
         std::cout << in.y.c0.val[i] << ", ";
     }
     std::cout << std::endl;
-    std::cout << "z: ";
+    std::cout << "  c1: ";
+    for (int i = 0; i < 12; i++) {
+        std::cout << in.y.c1.val[i] << ", ";
+    }
+    std::cout << std::endl;
+    std::cout << "z: "<<std::endl;
+    std::cout << "  c0: ";
     for (int i = 0; i < 12; i++) {
         std::cout << in.z.c0.val[i] << ", ";
+    }
+    std::cout << std::endl;
+    std::cout << "  c1: ";
+    for (int i = 0; i < 12; i++) {
+        std::cout << in.z.c1.val[i] << ", ";
     }
     std::cout << std::endl << std::endl;
 }
@@ -1402,12 +1420,15 @@ std::pair<std::string,bool> g1_double_test();
 
 std::pair<std::string,bool> g2_add_test();
 
+std::pair<std::string,bool> g2_add_mixed_test();
+
 int main() {
     std::vector<std::pair<std::string,bool>> results{
         g1_add_test(),
         g1_double_test(),
         g1_add_mixed_test(),
-        g2_add_test()
+        g2_add_test(),
+        g2_add_mixed_test()
     };
 
     for(int i = 0;i<results.size();++i){
@@ -1630,6 +1651,66 @@ std::pair<std::string,bool> g2_add_test(){
     check_hip_error();
 
     hipLaunchKernelGGL(kernel_G2_add, dim3(1), dim3(1), 0, 0, a_d, b_d, result_d);
+
+    check_hip_error();
+    hipDeviceSynchronize();
+    check_hip_error();
+
+    hipMemcpy(&result, result_d, size, hipMemcpyDeviceToHost);
+    hipDeviceSynchronize();
+    check_hip_error();
+    print_G2_project(testName,result);
+
+    //flattening result
+    uint32_t flattenResult[36];
+    memcpy(flattenResult,&result,size);
+
+    bool isFailed = false;
+    //assert cudaExpected vs result
+    for (int i = 0; i < 72; ++i) {
+        if(flattenResult[i]!=cudaExpected[i]){
+            isFailed = true;
+            break;
+        }
+    }
+
+    
+    hipFree(a_d);
+    hipFree(b_d);
+    hipFree(result_d);
+    return std::make_pair(testName,!isFailed);
+}
+
+std::pair<std::string,bool> g2_add_mixed_test(){
+    std::string testName = std::string(__FUNCTION__);
+    uint32_t a[72] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 196605, 1980301312, 3289120770, 3958636555, 1405573306, 1598593111, 1884444485, 2010011731, 2723605613, 1543969431, 4202751123, 368467651, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 196605, 1980301312, 3289120770, 3958636555, 1405573306, 1598593111, 1884444485, 2010011731, 2723605613, 1543969431, 4202751123, 368467651, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+
+    uint32_t b[48] = {2210944813, 3909903087, 603786564, 3883152423, 2173389250, 2956470872, 809479795, 2862133481, 1088430826, 3104844840,
+                      44451588,   226701902, 2426309915, 1558163374, 4125809737, 2860931858, 1688959796, 3877074395, 4208292625, 4034170426,
+                      2725679345, 1152044552, 819326913, 253933226, 2210944813, 3909903087, 603786564, 3883152423, 2173389250, 2956470872,
+                      809479795, 2862133481, 1088430826, 3104844840, 44451588, 226701902, 2426309915, 1558163374, 4125809737, 2860931858,
+                     1688959796, 3877074395, 4208292625, 4034170426, 2725679345, 1152044552, 819326913, 253933226};
+
+    uint32_t cudaExpected[72] = {630543538,2724914287,2928286071,1206988501,2890832672,1957021562,428270052,2832959188,454800231,280460773,2371362276,278770375,1711034215,786080655,2132723336,534742201,1414172201,793650756,3273312053,878272217,1768425118,3070428044,3865254552,313376622,1439687478,1699762003,2616701347,58055755,2869644811,210378998,3185430847,563614816,2438712083,188035116,717301920,93025059,2127133146,498565606,2156680602,1824566867,1488922578,1021153846,3024742101,4131599155,3962274867,1026693349,1379019381,285018239,126944175,404342239,2527468170,2956748879,207986017,4181688848,1828342311,4038727245,1047828733,654618778,3419187055,17126065,557237479,2276220765,353482893,2614146573,410598167,1993248169,143346264,1438889812,1133180384,476253848,2787769590,207208886};
+
+
+    G2_projective *a_d, *result_d;
+    G2_affine *b_d;
+    G2_projective result;
+
+    auto size = sizeof(G2_projective);
+    auto affineSize = sizeof(G2_affine);
+    hipMalloc(&a_d, size);
+    hipMalloc(&b_d, affineSize);
+    hipMalloc(&result_d, size);
+    check_hip_error();
+
+    hipMemcpy(a_d, a, size, hipMemcpyHostToDevice);
+    hipMemcpy(b_d, b, affineSize, hipMemcpyHostToDevice);
+    hipDeviceSynchronize();
+    check_hip_error();
+
+    hipLaunchKernelGGL(kernel_G2_add_mixed, dim3(1), dim3(1), 0, 0, a_d, b_d, result_d);
 
     check_hip_error();
     hipDeviceSynchronize();
