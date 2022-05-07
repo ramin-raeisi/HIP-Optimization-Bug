@@ -5,60 +5,44 @@ The code comes from the Lotus project, which can be found at https://github.com/
 
 LICENSE-MIT and LICENSE-APACHE are two of the lotus licenses.
 
----
 The GPU code was extracted from the `bellperson` project, which is a `sub-project` of the Lotus project.
-In this code, I've removed all unnecessary code in order to test the `g1_add` function in HIP/ROCm.
-The GPU code can be found in `g1_add.cu` source.
 
-The main problem is that when we use optimization flags like `-O3`, the result differs
-significantly from when we use the `-O0` flag, This error will occur on two system with `gfx908` and `gfx900` gpus. The results are displayed below.
-(the optimization flags can be found in Makefile)
+---
+## Introduction to the problem
+Having fixed all errors with the newly installed compiler on our server, we tested our **full source code** but encountered a new problem.
+The problem can be seen in the following:
 
-I have also tested the code by cuda compiler and the result is the same with the `-O0` flag.
+```
+fatal error: error in backend: no registers from class available to allocate
+clang-15: error: clang frontend command failed with exit code 70 (use -v to see invocation)
+clang version 15.0.0 (ssh://chfang@git.amd.com:29418/lightning/ec/llvm-project 5c271fb43e6e8030d659c6d48a003be01ddb50dd)
+Target: x86_64-unknown-linux-gnu
+Thread model: posix
+InstalledDir: /home/c9/amd/llvm-050622/bin
+clang-15: note: diagnostic msg: 
+********************
 
-### note
-Using the `[[clang::optnone]]` attribute for the `G1_add` function, we can see that the test results are correct even when compiled with O3 flag.
-This is not ideal, but you can test it in the `optnone` branch.
+PLEASE ATTACH THE FOLLOWING FILES TO THE BUG REPORT:
+Preprocessed source(s) and associated run script(s) are located at:
+clang-15: note: diagnostic msg: /tmp/source-de1f58/source-gfx908.cu
+clang-15: note: diagnostic msg: /tmp/source-de1f58/source-gfx908.sh
+clang-15: note: diagnostic msg: 
 
-## Test1(gfx908)
-- gpu : gfx908
-- os: ubuntu 20.04
-- hip_version: 5.0.0(different versions tested, but always results in the same error)
+********************
+```
 
-### -O0 flag
+`source-gfx908.cu` and `source-gfx908.sh` are provided in the branch For your assessment( in report folder ).
 
-    $ ./run.sh 
-    rm -f g1_add *.o
-    /opt/rocm/hip/bin/hipcc -std=c++14 -O0 -I/opt/include/ -o g1_add g1_add.cu
-    x: 695163763, 838428337, 867136025, 3916970060, 1083605276, 2882035772, 3603006931, 2269309842, 422274527, 1169772790, 1990394245, 416975321, 
-    y: 1229022948, 3366429108, 670218974, 1658335027, 392632874, 1379067484, 798160530, 3656524164, 3793686573, 2144155088, 2721370348, 298035558, 
-    z: 413203031, 3318893592, 1282426328, 1145762026, 1542369093, 485346739, 1679000480, 4026228341, 2371190916, 3558967189, 3094593878, 414846589,
-### -O3 flag
+We have also checked the source code to see if removing the `G1_bellman_multiexp` and `G2_bellman_multiexp` code will solve the problem.
+The code compiles in about 2 seconds by commenting out these two functions.
 
-    $ ./run.sh 
-    rm -f g1_add *.o
-    /opt/rocm/hip/bin/hipcc -std=c++14 -O3 -I/opt/include/ -o g1_add g1_add.cu
-    x: 2219282510, 760277030, 550604824, 1084982058, 1598340764, 4070768988, 58429962, 1029107186, 416340485, 2067845827, 3739158037, 1359784916, 
-    y: 2110372024, 922872633, 3951822721, 2291919632, 395581724, 1245577012, 1515893760, 1633137805, 375254496, 1642521037, 2226945294, 2153458039, 
-    z: 1774849172, 2702311364, 79269099, 3819870691, 506309, 3711088651, 2420102526, 2732203651, 134185010, 763995165, 1644979634, 372489431,
+With `G1_bellman_multiexp`, we can see that the code is compiled within a few minutes.
+When we add `G2_bellman_multiexp`, however, we see that the code does not compile and after 40 minutes, the compiler crashes.
 
-## Test2(gfx900)
-- gpu : gfx900
-- os: ubuntu 20.04
-- hip_version: 5.0.0
-### -O0 flag
+---
+## does the previous compiler has the same problem?
+No, the previous compiler does not have the same problem. We checked it 
+by **not** using the below export:
 
-    $ ./run.sh 
-    rm -f g1_add *.o
-    /opt/rocm/hip/bin/hipcc -std=c++14 -O0 -I/opt/include/ --amdgpu-target=gfx900 -o g1_add g1_add.cu
-    x: 695163763, 838428337, 867136025, 3916970060, 1083605276, 2882035772, 3603006931, 2269309842, 422274527, 1169772790, 1990394245, 416975321, 
-    y: 1229022948, 3366429108, 670218974, 1658335027, 392632874, 1379067484, 798160530, 3656524164, 3793686573, 2144155088, 2721370348, 298035558, 
-    z: 413203031, 3318893592, 1282426328, 1145762026, 1542369093, 485346739, 1679000480, 4026228341, 2371190916, 3558967189, 3094593878, 414846589,
-### -O3 flag
-
-    $ ./run.sh 
-    rm -f g1_add *.o
-    /opt/rocm/hip/bin/hipcc -std=c++14 -O3 -I/opt/include/ --amdgpu-target=gfx900 -o g1_add g1_add.cu
-    x: 2929414586, 969768673, 2320176390, 299604284, 1872350046, 1842943764, 2580129601, 3246407952, 3262431993, 3573956922, 451610209, 160000686, 
-    y: 1803897690, 2447850291, 4070635830, 3392081673, 3269585030, 1599467931, 3607413871, 1287758637, 1597882672, 3461576140, 1052015481, 3190781428, 
-    z: 2716997885, 450547341, 2764350271, 4292641511, 3738188316, 2435605332, 3300623324, 1860722296, 426561640, 209336877, 1524356693, 114052808, 
+    export HIP_CLANG_PATH=/home/c9/amd/llvm-050622/bin/
+and the code compiles without any error.

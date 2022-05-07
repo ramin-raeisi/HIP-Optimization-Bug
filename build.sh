@@ -1,0 +1,1 @@
+hipcc -v --genco -O3 --amdgpu-target=gfx908 source.cu -o out.hsaco
