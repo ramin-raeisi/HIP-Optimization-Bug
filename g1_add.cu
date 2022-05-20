@@ -56,12 +56,43 @@ DEVICE uint mac_with_carry_32(uint a, uint b, uint c, uint *d) {
 // Returns a + b, puts the carry in b
 DEVICE uint add_with_carry_32(uint a, uint *b) {
     uint lo, hi;
-    asm volatile("v_add_co_u32 %0, vcc, %1, %2;" : "+v"(lo): "v"(a), "v"(*b): "vcc");
-    asm volatile("v_addc_co_u32 %0, vcc, 0, 0, vcc;" : "+v"(hi)::"vcc");
-    // asm volatile("v_add_co_u32 %0, vcc, %0, %1" : "+v"(hi): "v"(0) : "vcc");
-    asm volatile("v_add_co_u32 %0, vcc, %0, 0" : "+v"(hi) : : "vcc");
+    asm volatile("v_add_co_u32 %0, vcc, %2, %3;\r\n"
+                 "v_addc_co_u32 %1, vcc, 0, 0, vcc;\r\n"
+                 : "+v"(lo), "+v"(hi) : "v"(a), "v"(*b) : "vcc");
+
     *b = hi;
     return lo;
+}
+
+// Returns a + b, puts the carry in b
+DEVICE ulong add_with_carry_64(ulong a, ulong *b) {
+#if defined(HIP)
+    ulong lo;
+    uint32_t a_low = a;
+    uint32_t b_low = *b;
+    uint32_t add_low, add_high, temp;
+    asm volatile("v_add_u32 %0, %1, %2;" : "+v"(add_low) : "v"(a_low), "v"(b_low));
+    uint32_t a_high = a >> 32;
+    uint32_t b_high = (*b) >> 32;
+    asm volatile("v_addc_co_u32 %0, vcc, %1, %2, vcc;" : "+v"(add_high) : "v"(a_high), "v"(b_high): "vcc");
+    asm volatile("v_addc_co_u32 %0, vcc, 0, 0, vcc;" : "+v"(temp)::"vcc");
+    *b = temp;
+    lo = add_high;
+    lo = lo << 32;
+    lo = lo + add_low;
+    return lo;
+#elif defined(OPENCL_NVIDIA) || defined(CUDA)
+    ulong lo, hi;
+    asm("add.cc.u64 %0, %2, %3;\r\n"
+        "addc.u64 %1, 0, 0;\r\n"
+        : "=l"(lo), "=l"(hi) : "l"(a), "l"(*b));
+    *b = hi;
+    return lo;
+#else
+    ulong lo = a + *b;
+    *b = lo < a;
+    return lo;
+#endif
 }
 
 typedef uint uint32_t;
@@ -82,48 +113,54 @@ DEVICE inline uint32_t addc_cc(uint32_t a, uint32_t b) {
 
 DEVICE inline uint32_t addc(uint32_t a, uint32_t b) {
     uint32_t r;
-    asm volatile("v_addc_co_u32 %0, vcc, %1, %2, vcc;" : "+v"(r): "v"(a), "v"(b): "vcc");
-    //To reset carry
-    // asm volatile("v_add_co_u32 %0, vcc, %0, %1;" : "+v"(r) : "v"(0) : "vcc");
-    asm volatile("v_add_co_u32 %0, vcc, %0, 0;" : "+v"(r) : : "vcc");
+    // asm volatile("v_addc_co_u32 %0, vcc, %1, %2, vcc;" : "+v"(r): "v"(a), "v"(b): "vcc");
+    // //To reset carry
+    // // asm volatile("v_add_co_u32 %0, vcc, %0, %1;" : "+v"(r) : "v"(0) : "vcc");
+    // asm volatile("v_add_co_u32 %0, vcc, %0, 0;" : "+v"(r) : : "vcc");
+
+    asm volatile("v_addc_co_u32 %0, vcc, %1, %2, vcc;\r\n"
+                "v_add_co_u32 %0, vcc, %0, 0;\r\n"
+                : "+v"(r): "v"(a), "v"(b): "vcc");
     return r;
 }
 
 DEVICE inline uint32_t madlo_cc(uint32_t a, uint32_t b, uint32_t c) {
     uint32_t r;
-    asm volatile("v_mul_lo_u32 %0, %1, %2" : "+v"(r): "v"(a), "v"(b));
-    asm volatile("v_add_co_u32 %0, vcc, %0, %1" : "+v"(r): "v"(c) : "vcc");
-    return r;
+  asm volatile("v_mul_lo_u32 %0, %1, %2;\r\n"
+              "v_add_co_u32 %0, vcc, %0, %3;\r\n"
+              : "+v"(r): "v"(a), "v"(b), "v"(c) : "vcc");    return r;
 }
 
 DEVICE inline uint32_t madloc_cc(uint32_t a, uint32_t b, uint32_t c) {
     uint32_t r;
-    asm volatile("v_mul_lo_u32 %0, %1, %2" : "+v"(r): "v"(a), "v"(b));
-    asm volatile("v_addc_co_u32 %0, vcc, %0, %1, vcc" : "+v"(r): "v"(c): "vcc");
+  asm volatile("v_mul_lo_u32 %0, %1, %2;\r\n"
+              "v_addc_co_u32 %0, vcc, %0, %3, vcc;\r\n"
+              : "+v"(r) : "v"(a), "v"(b), "v"(c) : "vcc");
     return r;
 }
 
 DEVICE inline uint32_t madhi_cc(uint32_t a, uint32_t b, uint32_t c) {
     uint32_t r;
-    asm volatile("v_mul_hi_u32 %0, %1, %2" : "+v"(r): "v"(a), "v"(b));
-    asm volatile("v_add_co_u32 %0, vcc, %0, %1" : "+v"(r): "v"(c) : "vcc");
+  asm volatile("v_mul_hi_u32 %0, %1, %2;\r\n"
+              "v_add_co_u32 %0, vcc, %0, %3;\r\n"
+              : "+v"(r): "v"(a), "v"(b), "v"(c) : "vcc");
     return r;
 }
 
 DEVICE inline uint32_t madhic_cc(uint32_t a, uint32_t b, uint32_t c) {
     uint32_t r;
-    asm volatile("v_mul_hi_u32 %0, %1, %2;" : "+v"(r): "v"(a), "v"(b));
-    asm volatile("v_addc_co_u32 %0, vcc, %0, %1, vcc;" : "+v"(r): "v"(c): "vcc");
+  asm volatile("v_mul_hi_u32 %0, %1, %2;\r\n"
+              "v_addc_co_u32 %0, vcc, %0, %3, vcc;\r\n"
+              : "+v"(r): "v"(a), "v"(b), "v"(c) : "vcc");
     return r;
 }
 
 DEVICE inline uint32_t madhic(uint32_t a, uint32_t b, uint32_t c) {
     uint32_t r;
-    asm volatile("v_mul_hi_u32 %0, %1, %2" : "+v"(r): "v"(a), "v"(b));
-    asm volatile("v_addc_co_u32 %0, vcc, %0, %1, vcc" : "+v"(r): "v"(c): "vcc");
-    //To reset carry
-    // asm volatile("v_add_co_u32 %0, vcc, %0, %1" : "+v"(r): "v"(0) : "vcc");
-    asm volatile("v_add_co_u32 %0, vcc, %0, 0" : "+v"(r) : : "vcc");
+  asm volatile("v_mul_hi_u32 %0, %1, %2;\r\n"
+              "v_addc_co_u32 %0, vcc, %0, %3, vcc;\r\n"
+              "v_add_co_u32 %0, %0, %4;\r\n"
+              : "+v"(r): "v"(a), "v"(b), "v"(c), "v"(0) : "vcc");
     return r;
 }
 
@@ -186,30 +223,34 @@ CONSTANT Fr Fr_R2 = {{4092763245, 3382307216, 2274516003, 728559051, 1918122383,
 CONSTANT Fr Fr_ZERO = {{0, 0, 0, 0, 0, 0, 0, 0}};
 
 DEVICE Fr Fr_sub_nvidia(Fr a, Fr b) {
-    asm volatile("v_sub_co_u32 %0, vcc, %0, %1" : "+v"(a.val[0]): "v"(b.val[0]) : "vcc");
-    asm volatile("v_subb_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[1]): "v"(b.val[1]): "vcc");
-    asm volatile("v_subb_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[2]): "v"(b.val[2]): "vcc");
-    asm volatile("v_subb_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[3]): "v"(b.val[3]): "vcc");
-    asm volatile("v_subb_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[4]): "v"(b.val[4]): "vcc");
-    asm volatile("v_subb_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[5]): "v"(b.val[5]): "vcc");
-    asm volatile("v_subb_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[6]): "v"(b.val[6]): "vcc");
-    asm volatile("v_subb_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[7]): "v"(b.val[7]): "vcc");
-    // asm volatile("v_sub_co_u32 %0, vcc, %0, %1" : "+v"(a.val[7]): "v"(0) : "vcc");
-    asm volatile("v_sub_co_u32 %0, vcc, %0, 0" : "+v"(a.val[7]): : "vcc");
+  asm volatile("v_sub_co_u32 %0, %0, %8;\r\n"
+              "v_subb_co_u32 %1, vcc, %1, %9, vcc;\r\n"
+              "v_subb_co_u32 %2, vcc, %2, %10, vcc;\r\n"
+              "v_subb_co_u32 %3, vcc, %3, %11, vcc;\r\n"
+              "v_subb_co_u32 %4, vcc, %4, %12, vcc;\r\n"
+              "v_subb_co_u32 %5, vcc, %5, %13, vcc;\r\n"
+              "v_subb_co_u32 %6, vcc, %6, %14, vcc;\r\n"
+              "v_subb_co_u32 %7, vcc, %7, %15, vcc;\r\n"
+              "v_sub_co_u32 %0, vcc, %0, %16;\r\n"
+              :"+v"(a.val[0]), "+v"(a.val[1]), "+v"(a.val[2]), "+v"(a.val[3]), "+v"(a.val[4]), "+v"(a.val[5]), "+v"(a.val[6]), "+v"(a.val[7])
+              :"v"(b.val[0]), "v"(b.val[1]), "v"(b.val[2]), "v"(b.val[3]), "v"(b.val[4]), "v"(b.val[5]), "v"(b.val[6]), "v"(b.val[7]), "v"(0) : "vcc");
+
     return a;
 }
 
 DEVICE Fr Fr_add_nvidia(Fr a, Fr b) {
-    asm volatile("v_add_co_u32 %0, vcc, %0, %1" : "+v"(a.val[0]): "v"(b.val[0]) : "vcc");
-    asm volatile("v_addc_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[1]): "v"(b.val[1]): "vcc");
-    asm volatile("v_addc_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[2]): "v"(b.val[2]): "vcc");
-    asm volatile("v_addc_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[3]): "v"(b.val[3]): "vcc");
-    asm volatile("v_addc_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[4]): "v"(b.val[4]): "vcc");
-    asm volatile("v_addc_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[5]): "v"(b.val[5]): "vcc");
-    asm volatile("v_addc_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[6]): "v"(b.val[6]): "vcc");
-    asm volatile("v_addc_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[7]): "v"(b.val[7]): "vcc");
-    // asm volatile("v_add_co_u32 %0, vcc, %0, %1" : "+v"(a.val[7]): "v"(0) : "vcc");
-    asm volatile("v_add_co_u32 %0, vcc, %0, 0" : "+v"(a.val[7]): : "vcc");
+    asm volatile("v_add_co_u32 %0, %0, %8;\r\n"
+              "v_addc_co_u32 %1, vcc, %1, %9, vcc;\r\n"
+              "v_addc_co_u32 %2, vcc, %2, %10, vcc;\r\n"
+              "v_addc_co_u32 %3, vcc, %3, %11, vcc;\r\n"
+              "v_addc_co_u32 %4, vcc, %4, %12, vcc;\r\n"
+              "v_addc_co_u32 %5, vcc, %5, %13, vcc;\r\n"
+              "v_addc_co_u32 %6, vcc, %6, %14, vcc;\r\n"
+              "v_addc_co_u32 %7, vcc, %7, %15, vcc;\r\n"
+              "v_add_co_u32 %0, vcc, %0, %16;\r\n"
+              :"+v"(a.val[0]), "+v"(a.val[1]), "+v"(a.val[2]), "+v"(a.val[3]), "+v"(a.val[4]), "+v"(a.val[5]), "+v"(a.val[6]), "+v"(a.val[7])
+              :"v"(b.val[0]), "v"(b.val[1]), "v"(b.val[2]), "v"(b.val[3]), "v"(b.val[4]), "v"(b.val[5]), "v"(b.val[6]), "v"(b.val[7]), "v"(0) : "vcc");
+
     return a;
 }
 
@@ -593,38 +634,41 @@ CONSTANT Fq Fq_ZERO = {{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}};
 
 
 DEVICE Fq Fq_sub_nvidia(Fq a, Fq b) {
-    asm volatile("v_sub_co_u32 %0, vcc, %0, %1" : "+v"(a.val[0]): "v"(b.val[0]) : "vcc");
-    asm volatile("v_subb_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[1]): "v"(b.val[1]): "vcc");
-    asm volatile("v_subb_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[2]): "v"(b.val[2]): "vcc");
-    asm volatile("v_subb_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[3]): "v"(b.val[3]): "vcc");
-    asm volatile("v_subb_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[4]): "v"(b.val[4]): "vcc");
-    asm volatile("v_subb_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[5]): "v"(b.val[5]): "vcc");
-    asm volatile("v_subb_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[6]): "v"(b.val[6]): "vcc");
-    asm volatile("v_subb_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[7]): "v"(b.val[7]): "vcc");
-    asm volatile("v_subb_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[8]): "v"(b.val[8]): "vcc");
-    asm volatile("v_subb_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[9]): "v"(b.val[9]): "vcc");
-    asm volatile("v_subb_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[10]): "v"(b.val[10]): "vcc");
-    asm volatile("v_subb_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[11]): "v"(b.val[11]): "vcc");
-    // asm volatile("v_sub_co_u32 %0, vcc, %0, %1" : "+v"(a.val[11]): "v"(0) : "vcc");
-    asm volatile("v_sub_co_u32 %0, vcc, %0, 0" : "+v"(a.val[11]): : "vcc");
-    return a;
+  asm volatile("v_sub_co_u32 %0, %0, %12;\r\n"
+               "v_subb_co_u32 %1, vcc, %1, %13, vcc;\r\n"
+               "v_subb_co_u32 %2, vcc, %2, %14, vcc;\r\n"
+               "v_subb_co_u32 %3, vcc, %3, %15, vcc;\r\n"
+               "v_subb_co_u32 %4, vcc, %4, %16, vcc;\r\n"
+               "v_subb_co_u32 %5, vcc, %5, %17, vcc;\r\n"
+               "v_subb_co_u32 %6, vcc, %6, %18, vcc;\r\n"
+               "v_subb_co_u32 %7, vcc, %7, %19, vcc;\r\n"
+               "v_subb_co_u32 %8, vcc, %8, %20, vcc;\r\n"
+               "v_subb_co_u32 %9, vcc, %9, %21, vcc;\r\n"
+               "v_subb_co_u32 %10, vcc, %10, %22, vcc;\r\n"
+               "v_subb_co_u32 %11, vcc, %11, %23, vcc;\r\n"
+               "v_sub_co_u32 %0, vcc, %0, %24;\r\n"
+               : "+v"(a.val[0]), "+v"(a.val[1]), "+v"(a.val[2]), "+v"(a.val[3]), "+v"(a.val[4]), "+v"(a.val[5]), "+v"(a.val[6]), "+v"(a.val[7]), "+v"(a.val[8]), "+v"(a.val[9]), "+v"(a.val[10]), "+v"(a.val[11])
+               : "v"(b.val[0]), "v"(b.val[1]), "v"(b.val[2]), "v"(b.val[3]), "v"(b.val[4]), "v"(b.val[5]), "v"(b.val[6]), "v"(b.val[7]), "v"(b.val[8]), "v"(b.val[9]), "v"(b.val[10]), "v"(b.val[11]), "v"(0) : "vcc");
+  return a;
 }
 
 DEVICE Fq Fq_add_nvidia(Fq a, Fq b) {
-    asm volatile("v_add_co_u32 %0, vcc, %0, %1" : "+v"(a.val[0]): "v"(b.val[0]) : "vcc");
-    asm volatile("v_addc_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[1]): "v"(b.val[1]): "vcc");
-    asm volatile("v_addc_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[2]): "v"(b.val[2]): "vcc");
-    asm volatile("v_addc_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[3]): "v"(b.val[3]): "vcc");
-    asm volatile("v_addc_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[4]): "v"(b.val[4]): "vcc");
-    asm volatile("v_addc_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[5]): "v"(b.val[5]): "vcc");
-    asm volatile("v_addc_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[6]): "v"(b.val[6]): "vcc");
-    asm volatile("v_addc_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[7]): "v"(b.val[7]): "vcc");
-    asm volatile("v_addc_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[8]): "v"(b.val[8]): "vcc");
-    asm volatile("v_addc_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[9]): "v"(b.val[9]): "vcc");
-    asm volatile("v_addc_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[10]): "v"(b.val[10]): "vcc");
-    asm volatile("v_addc_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[11]): "v"(b.val[11]): "vcc");
-    // asm volatile("v_add_co_u32 %0, vcc, %0, %1" : "+v"(a.val[11]): "v"(0) : "vcc");
-    asm volatile("v_add_co_u32 %0, vcc, %0, 0" : "+v"(a.val[11]): : "vcc");
+  asm volatile("v_add_co_u32 %0, %0, %12;\r\n"
+              "v_addc_co_u32 %1, vcc, %1, %13, vcc;\r\n"
+              "v_addc_co_u32 %2, vcc, %2, %14, vcc;\r\n"
+              "v_addc_co_u32 %3, vcc, %3, %15, vcc;\r\n"
+              "v_addc_co_u32 %4, vcc, %4, %16, vcc;\r\n"
+              "v_addc_co_u32 %5, vcc, %5, %17, vcc;\r\n"
+              "v_addc_co_u32 %6, vcc, %6, %18, vcc;\r\n"
+              "v_addc_co_u32 %7, vcc, %7, %19, vcc;\r\n"
+              "v_addc_co_u32 %8, vcc, %8, %20, vcc;\r\n"
+              "v_addc_co_u32 %9, vcc, %9, %21, vcc;\r\n"
+              "v_addc_co_u32 %10, vcc, %10, %22, vcc;\r\n"
+              "v_addc_co_u32 %11, vcc, %11, %23, vcc;\r\n"
+              "v_add_co_u32 %0, vcc, %0, %24;\r\n"
+              : "+v"(a.val[0]), "+v"(a.val[1]), "+v"(a.val[2]), "+v"(a.val[3]), "+v"(a.val[4]), "+v"(a.val[5]), "+v"(a.val[6]), "+v"(a.val[7]), "+v"(a.val[8]), "+v"(a.val[9]), "+v"(a.val[10]), "+v"(a.val[11])
+              : "v"(b.val[0]), "v"(b.val[1]), "v"(b.val[2]), "v"(b.val[3]), "v"(b.val[4]), "v"(b.val[5]), "v"(b.val[6]), "v"(b.val[7]), "v"(b.val[8]), "v"(b.val[9]), "v"(b.val[10]), "v"(b.val[11]), "v"(0) : "vcc");
+
     return a;
 }
 
@@ -1281,6 +1325,14 @@ KERNEL void kernel_G2_add(G2_projective *a, G2_projective *b, G2_projective *res
   *result = G2_add(*a, *b);
 }
 
+KERNEL void kernel_add_with_carry_32(uint *a, uint *b, uint *result) {
+  *result = add_with_carry_32(*a, b);
+}
+
+KERNEL void kernel_add_with_carry_64(ulong *a, ulong *b, ulong *result) {
+  *result = add_with_carry_64(*a, b);
+}
+
 void print_fq(Fq in,Fq exp,const char* label,const char* end){
     std::cout << label;
     for (int i = 0; i < 12; i++) {
@@ -1343,6 +1395,10 @@ std::pair<std::string,bool> g2_add_mixed_test();
 
 std::pair<std::string,bool> g2_double_test();
 
+std::pair<std::string,bool> test_add_with_carry_32();
+
+std::pair<std::string,bool> test_add_with_carry_64();
+
 int main() {
     std::vector<std::pair<std::string,bool>> results{
         g1_add_test(),
@@ -1350,7 +1406,9 @@ int main() {
         g1_add_mixed_test(),
         g2_add_test(),
         g2_add_mixed_test(),
-        g2_double_test()
+        g2_double_test(),
+        test_add_with_carry_32(),
+        test_add_with_carry_64()
     };
 
     for(int i = 0;i<results.size();++i){
@@ -1361,7 +1419,81 @@ int main() {
     std::cout<<std::endl;
 }
 
+std::pair<std::string,bool> test_add_with_carry_64(){
+    std::string testName = std::string(__FUNCTION__);
+    uint64_t a[1] = {8};
+    uint64_t b[1] = {5};
+    uint64_t result[1]={0};
+    uint64_t expected_result = 13;
 
+    uint64_t* a_d;
+    uint64_t* b_d;
+    uint64_t* result_d;
+    hipMalloc(&a_d,sizeof(uint64_t));
+    hipMalloc(&b_d,sizeof(uint64_t));
+    hipMalloc(&result_d,sizeof(uint64_t));
+
+    hipMemcpy(a_d, a, sizeof(uint64_t), hipMemcpyHostToDevice);
+    hipMemcpy(b_d, b, sizeof(uint64_t), hipMemcpyHostToDevice);
+
+    hipDeviceSynchronize();
+    check_hip_error();
+
+    hipLaunchKernelGGL(kernel_add_with_carry_64, dim3(1), dim3(1), 0, 0, a_d, b_d, result_d);
+    check_hip_error();
+    hipDeviceSynchronize();
+    check_hip_error();
+
+    hipMemcpy(&result, result_d, sizeof(uint64_t), hipMemcpyDeviceToHost);
+
+    bool isFailed = false;
+    if(result[0]!=expected_result){
+        isFailed = true;
+    }
+    
+    hipFree(a_d);
+    hipFree(b_d);
+    hipFree(result_d);
+    return std::make_pair(testName,!isFailed);
+}
+
+std::pair<std::string,bool> test_add_with_carry_32(){
+    std::string testName = std::string(__FUNCTION__);
+    uint32_t a[1] = {8};
+    uint32_t b[1] = {5};
+    uint32_t result[1]={0};
+    uint32_t expected_result = 13;
+
+    uint32_t* a_d;
+    uint32_t* b_d;
+    uint32_t* result_d;
+    hipMalloc(&a_d,sizeof(uint32_t));
+    hipMalloc(&b_d,sizeof(uint32_t));
+    hipMalloc(&result_d,sizeof(uint32_t));
+
+    hipMemcpy(a_d, a, sizeof(uint32_t), hipMemcpyHostToDevice);
+    hipMemcpy(b_d, b, sizeof(uint32_t), hipMemcpyHostToDevice);
+
+    hipDeviceSynchronize();
+    check_hip_error();
+
+    hipLaunchKernelGGL(kernel_add_with_carry_32, dim3(1), dim3(1), 0, 0, a_d, b_d, result_d);
+    check_hip_error();
+    hipDeviceSynchronize();
+    check_hip_error();
+
+    hipMemcpy(&result, result_d, sizeof(uint32_t), hipMemcpyDeviceToHost);
+
+    bool isFailed = false;
+    if(result[0]!=expected_result){
+        isFailed = true;
+    }
+    
+    hipFree(a_d);
+    hipFree(b_d);
+    hipFree(result_d);
+    return std::make_pair(testName,!isFailed);
+}
 
 std::pair<std::string,bool> g1_add_test(){
     std::string testName = std::string(__FUNCTION__);
@@ -1428,16 +1560,13 @@ std::pair<std::string,bool> g1_add_test(){
 
 std::pair<std::string,bool> g1_add_mixed_test(){
     std::string testName = std::string(__FUNCTION__);
-    uint32_t a[36] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                     196605, 1980301312, 3289120770, 3958636555, 1405573306, 1598593111, 1884444485, 2010011731, 2723605613, 1543969431, 4202751123, 368467651,
-                      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+    uint32_t a[36] = {2395120562, 3786888445, 1582012131, 470272752, 484911279, 1876807493, 491778606, 3876892965, 3685902226, 2518471697, 2867656808, 334352122, 1178201815, 1888876881, 1421788681, 3266897916, 348304784, 1613866059, 3707460735, 71912215, 3029149043, 2201101821, 2758980691, 435057554, 2135400834, 700462646, 2425436445, 646334718, 3742877703, 1757280526, 645903899, 1746495021, 2009173599, 3050237561, 3090679167, 294266084};
 
-    uint32_t b[24] = {2210944813, 3909903087, 603786564, 3883152423, 2173389250, 2956470872, 809479795, 2862133481, 1088430826, 3104844840, 44451588, 226701902,
-                      2426309915, 1558163374, 4125809737, 2860931858, 1688959796, 3877074395, 4208292625, 4034170426, 2725679345, 1152044552, 819326913, 253933226};
+    uint32_t b[24] = {1593683062, 3217737125, 2123786011, 281700887, 925580346, 1172245260, 415663452, 1530194702, 2230925192, 3059137178, 896059255, 268931160, 3313020370, 3626838442, 796811132, 1531537046, 3504156260, 670005886, 1533786880, 3252591351, 2265285289, 3233527847, 287578874, 270363210};
 
-    uint32_t cudaExpected[36] = {2210944813, 3909903087, 603786564, 3883152423, 2173389250, 2956470872, 809479795, 2862133481, 1088430826, 3104844840, 44451588, 226701902,
-                                 2426309915, 1558163374, 4125809737, 2860931858, 1688959796, 3877074395, 4208292625, 4034170426, 2725679345, 1152044552, 819326913, 253933226,
-                                 196605, 1980301312, 3289120770, 3958636555, 1405573306, 1598593111, 1884444485, 2010011731, 2723605613, 1543969431, 4202751123, 368467651};
+    uint32_t cudaExpected[36] = {91982374, 2675151967, 4279854241, 3432570998, 2388875982, 2336020852, 2261253900, 3293165349, 1928294503, 595778821, 393623224, 127628426,
+                                 93338855, 900195312, 1919844805, 1195399157, 3751280066, 3810861134, 3064004963, 4199086728, 3858367916, 844711264, 4208694746, 136004056,
+                                 3616138652, 4161284733, 2276674391, 2835049215, 4144854416, 128803113, 1948865681, 2521176210, 1168104661, 2834712911, 3582460350, 59312263};
 
 
     G1_projective *a_d, *result_d;
