@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <iostream>
 #include <assert.h>
+#include <iomanip>
 
 void check_hip_error(void) {
     hipError_t err = hipGetLastError();
@@ -1281,6 +1282,70 @@ KERNEL void kernel_G2_add(G2_projective *a, G2_projective *b, G2_projective *res
   *result = G2_add(*a, *b);
 }
 
+KERNEL void kernel_add_with_carry_32(uint *a, uint *b, uint *result) {
+  *result = add_with_carry_32(*a, b);
+}
+
+// KERNEL void kernel_add_with_carry_64(ulong *a, ulong *b, ulong *result) {
+//   *result = add_with_carry_64(*a, b);
+// }
+
+KERNEL void kernel_Fr_sub_nvidia(Fr *a, Fr *b, Fr *result)  {
+  *result = Fr_sub_nvidia(*a, *b);
+}
+
+KERNEL void kernel_Fr_add_nvidia(Fr *a, Fr *b, Fr *result)  {
+  *result = Fr_add_nvidia(*a, *b);
+}
+
+KERNEL void kernel_add_cc(uint *a, uint *b, uint *result)  {
+  *result = add_cc(*a, *b);
+}
+
+KERNEL void kernel_addc_cc(uint *a, uint *b, uint *result)  {
+  *result = addc_cc(*a, *b);
+}
+
+KERNEL void kernel_addc(uint *a, uint *b, uint *result)  {
+  *result = addc(*a, *b);
+}
+
+KERNEL void kernel_madlo_cc(uint *a, uint *b, uint *c, uint *result)  {
+  *result = madlo_cc(*a, *b, *c);
+}
+
+KERNEL void kernel_madloc_cc(uint *a, uint *b, uint *c, uint *result)  {
+  *result = madloc_cc(*a, *b, *c);
+}
+
+KERNEL void kernel_madhi_cc(uint *a, uint *b, uint *c, uint *result)  {
+  *result = madhi_cc(*a, *b, *c);
+}
+
+KERNEL void kernel_madhic_cc(uint *a, uint *b, uint *c, uint *result)  {
+  *result = madhic_cc(*a, *b, *c);
+}
+
+KERNEL void kernel_madhic(uint *a, uint *b, uint *c, uint *result)  {
+  *result = madhic(*a, *b, *c);
+}
+
+KERNEL void kernel_chain_add(chain_t *ch, uint *a, uint *b, uint *result)  {
+  *result = chain_add(ch, *a, *b);
+}
+
+KERNEL void kernel_chain_madlo(chain_t *ch, uint *a, uint *b, uint *c, uint *result)  {
+  *result = chain_madlo(ch, *a, *b, *c);
+}
+
+KERNEL void kernel_chain_madhi(chain_t *ch, uint *a, uint *b, uint *c, uint *result)  {
+  *result = chain_madhi(ch, *a, *b, *c);
+}
+
+KERNEL void kernel_mac_with_carry_32(uint *a, uint *b, uint *c, uint *d, uint *result)  {
+  *result = mac_with_carry_32(*a, *b, *c, d);
+}
+
 void print_fq(Fq in,Fq exp,const char* label,const char* end){
     std::cout << label;
     for (int i = 0; i < 12; i++) {
@@ -1343,6 +1408,38 @@ std::pair<std::string,bool> g2_add_mixed_test();
 
 std::pair<std::string,bool> g2_double_test();
 
+std::pair<std::string,bool> test_add_with_carry_32();
+
+// std::pair<std::string,bool> test_add_with_carry_64();
+
+std::pair<std::string,bool> test_fr_sub_nvidia();
+
+std::pair<std::string,bool> test_fr_add_nvidia();
+
+std::pair<std::string,bool> test_add_cc();
+
+std::pair<std::string,bool> test_addc_cc();
+
+std::pair<std::string,bool> test_addc();
+
+std::pair<std::string,bool> test_madhic();
+
+std::pair<std::string,bool> test_chain_madhi();
+
+std::pair<std::string,bool> test_chain_madlo();
+
+std::pair<std::string,bool> test_chain_add();
+
+std::pair<std::string,bool> test_madhic_cc();
+
+std::pair<std::string,bool> test_madhi_cc();
+
+std::pair<std::string,bool> test_madloc_cc();
+
+std::pair<std::string,bool> test_madlo_cc();
+
+std::pair<std::string,bool> test_mac_with_carry_32();
+
 int main() {
     std::vector<std::pair<std::string,bool>> results{
         g1_add_test(),
@@ -1350,18 +1447,730 @@ int main() {
         g1_add_mixed_test(),
         g2_add_test(),
         g2_add_mixed_test(),
-        g2_double_test()
+        g2_double_test(),
+        test_add_with_carry_32(),
+        // test_add_with_carry_64(),
+        test_fr_sub_nvidia(),
+        test_fr_add_nvidia(),
+        test_add_cc(),
+        test_addc_cc(),
+        test_addc(),
+        test_madhic(),
+        test_chain_madhi(),
+        test_chain_madlo(),
+        test_chain_add(),
+        test_madhic_cc(),
+        test_madhi_cc(),
+        test_madloc_cc(),
+        test_madlo_cc(),
+        test_mac_with_carry_32()
     };
-
+std::cout<<std::string(50,'-')<<std::endl;
+std::cout<<std::setw(30)<<std::left<<"Test name"<<std::setw(20)<<"result"<<std::endl;
+std::cout<<std::string(50,'-')<<std::endl;
     for(int i = 0;i<results.size();++i){
         std::string result = results[i].second==true ? " success" : " failed";
         std::string color = results[i].second==true ? "\033[1;32m" : "\033[1;31m";
-        std::cout<<color<<results[i].first<<"->" << result<<"\033[0m"<<std::endl;
+        std::cout<<color<<std::setw(30)<<results[i].first<< std::setw(20) << result<<"\033[0m"<<std::endl;
     }
+    std::cout<<std::string(50,'-')<<std::endl;
     std::cout<<std::endl;
 }
 
+std::pair<std::string,bool> test_mac_with_carry_32(){
+    std::string testName = std::string(__FUNCTION__);
+    using type = uint32_t;
+    type a[1] = {8};
+    type b[1] = {5};
+    type c[1] = {4};
+    type d[1] = {3};
+    type result[1]={0};
+    type expected_result = 47;
 
+    type* a_d;
+    type* b_d;
+    type* c_d;
+    type* d_d;
+    type* result_d;
+    hipMalloc(&a_d,sizeof(type));
+    hipMalloc(&b_d,sizeof(type));
+    hipMalloc(&c_d,sizeof(type));
+    hipMalloc(&d_d,sizeof(type));
+    hipMalloc(&result_d,sizeof(type));
+
+    hipMemcpy(a_d, a, sizeof(type), hipMemcpyHostToDevice);
+    hipMemcpy(b_d, b, sizeof(type), hipMemcpyHostToDevice);
+    hipMemcpy(c_d, c, sizeof(type), hipMemcpyHostToDevice);
+    hipMemcpy(d_d, d, sizeof(type), hipMemcpyHostToDevice);
+
+    hipDeviceSynchronize();
+    check_hip_error();
+
+    hipLaunchKernelGGL(kernel_mac_with_carry_32, dim3(1), dim3(1), 0, 0, a_d, b_d,c_d, d_d, result_d);
+    check_hip_error();
+    hipDeviceSynchronize();
+    check_hip_error();
+
+    hipMemcpy(&result, result_d, sizeof(type), hipMemcpyDeviceToHost);
+
+    bool isFailed = false;
+    if(result[0]!=expected_result){
+        isFailed = true;
+    }
+    
+    hipFree(a_d);
+    hipFree(b_d);
+    hipFree(c_d);
+    hipFree(d_d);
+    hipFree(result_d);
+    return std::make_pair(testName,!isFailed);
+}
+
+std::pair<std::string,bool> test_madlo_cc(){
+    std::string testName = std::string(__FUNCTION__);
+    using type = uint32_t;
+    type a[1] = {8};
+    type b[1] = {5};
+    type c[1] = {4};
+    type result[1]={0};
+    type expected_result = 44;
+
+    type* a_d;
+    type* b_d;
+    type* c_d;
+    type* result_d;
+    hipMalloc(&a_d,sizeof(type));
+    hipMalloc(&b_d,sizeof(type));
+    hipMalloc(&c_d,sizeof(type));
+    hipMalloc(&result_d,sizeof(type));
+
+    hipMemcpy(a_d, a, sizeof(type), hipMemcpyHostToDevice);
+    hipMemcpy(b_d, b, sizeof(type), hipMemcpyHostToDevice);
+    hipMemcpy(c_d, c, sizeof(type), hipMemcpyHostToDevice);
+
+    hipDeviceSynchronize();
+    check_hip_error();
+
+    hipLaunchKernelGGL(kernel_madlo_cc, dim3(1), dim3(1), 0, 0, a_d, b_d,c_d, result_d);
+    check_hip_error();
+    hipDeviceSynchronize();
+    check_hip_error();
+
+    hipMemcpy(&result, result_d, sizeof(type), hipMemcpyDeviceToHost);
+
+    bool isFailed = false;
+    if(result[0]!=expected_result){
+        isFailed = true;
+    }
+    
+    hipFree(a_d);
+    hipFree(b_d);
+    hipFree(c_d);
+    hipFree(result_d);
+    return std::make_pair(testName,!isFailed);
+}
+
+std::pair<std::string,bool> test_madloc_cc(){
+    std::string testName = std::string(__FUNCTION__);
+    using type = uint32_t;
+    type a[1] = {8};
+    type b[1] = {5};
+    type c[1] = {4};
+    type result[1]={0};
+    type expected_result = 44;
+
+    type* a_d;
+    type* b_d;
+    type* c_d;
+    type* result_d;
+    hipMalloc(&a_d,sizeof(type));
+    hipMalloc(&b_d,sizeof(type));
+    hipMalloc(&c_d,sizeof(type));
+    hipMalloc(&result_d,sizeof(type));
+
+    hipMemcpy(a_d, a, sizeof(type), hipMemcpyHostToDevice);
+    hipMemcpy(b_d, b, sizeof(type), hipMemcpyHostToDevice);
+    hipMemcpy(c_d, c, sizeof(type), hipMemcpyHostToDevice);
+
+    hipDeviceSynchronize();
+    check_hip_error();
+
+    hipLaunchKernelGGL(kernel_madloc_cc, dim3(1), dim3(1), 0, 0, a_d, b_d,c_d, result_d);
+    check_hip_error();
+    hipDeviceSynchronize();
+    check_hip_error();
+
+    hipMemcpy(&result, result_d, sizeof(type), hipMemcpyDeviceToHost);
+
+    bool isFailed = false;
+    if(result[0]!=expected_result){
+        isFailed = true;
+    }
+    
+    hipFree(a_d);
+    hipFree(b_d);
+    hipFree(c_d);
+    hipFree(result_d);
+    return std::make_pair(testName,!isFailed);
+}
+
+std::pair<std::string,bool> test_madhi_cc(){
+    std::string testName = std::string(__FUNCTION__);
+    using type = uint32_t;
+    type a[1] = {0xffffffff};
+    type b[1] = {2};
+    type c[1] = {4};
+    type result[1]={0};
+    type expected_result = 5;
+
+    type* a_d;
+    type* b_d;
+    type* c_d;
+    type* result_d;
+    hipMalloc(&a_d,sizeof(type));
+    hipMalloc(&b_d,sizeof(type));
+    hipMalloc(&c_d,sizeof(type));
+    hipMalloc(&result_d,sizeof(type));
+
+    hipMemcpy(a_d, a, sizeof(type), hipMemcpyHostToDevice);
+    hipMemcpy(b_d, b, sizeof(type), hipMemcpyHostToDevice);
+    hipMemcpy(c_d, c, sizeof(type), hipMemcpyHostToDevice);
+
+    hipDeviceSynchronize();
+    check_hip_error();
+
+    hipLaunchKernelGGL(kernel_madhi_cc, dim3(1), dim3(1), 0, 0, a_d, b_d,c_d, result_d);
+    check_hip_error();
+    hipDeviceSynchronize();
+    check_hip_error();
+
+    hipMemcpy(&result, result_d, sizeof(type), hipMemcpyDeviceToHost);
+
+    bool isFailed = false;
+    if(result[0]!=expected_result){
+        isFailed = true;
+    }
+    
+    hipFree(a_d);
+    hipFree(b_d);
+    hipFree(c_d);
+    hipFree(result_d);
+    return std::make_pair(testName,!isFailed);
+}
+
+std::pair<std::string,bool> test_madhic_cc(){
+    std::string testName = std::string(__FUNCTION__);
+    using type = uint32_t;
+    type a[1] = {0xffffffff};
+    type b[1] = {2};
+    type c[1] = {4};
+    type result[1]={0};
+    type expected_result = 5;
+
+    type* a_d;
+    type* b_d;
+    type* c_d;
+    type* result_d;
+    hipMalloc(&a_d,sizeof(type));
+    hipMalloc(&b_d,sizeof(type));
+    hipMalloc(&c_d,sizeof(type));
+    hipMalloc(&result_d,sizeof(type));
+
+    hipMemcpy(a_d, a, sizeof(type), hipMemcpyHostToDevice);
+    hipMemcpy(b_d, b, sizeof(type), hipMemcpyHostToDevice);
+    hipMemcpy(c_d, c, sizeof(type), hipMemcpyHostToDevice);
+
+    hipDeviceSynchronize();
+    check_hip_error();
+
+    hipLaunchKernelGGL(kernel_madhic_cc, dim3(1), dim3(1), 0, 0, a_d, b_d,c_d, result_d);
+    check_hip_error();
+    hipDeviceSynchronize();
+    check_hip_error();
+
+    hipMemcpy(&result, result_d, sizeof(type), hipMemcpyDeviceToHost);
+
+    bool isFailed = false;
+    if(result[0]!=expected_result){
+        isFailed = true;
+    }
+    
+    hipFree(a_d);
+    hipFree(b_d);
+    hipFree(c_d);
+    hipFree(result_d);
+    return std::make_pair(testName,!isFailed);
+}
+
+std::pair<std::string,bool> test_chain_add(){
+    std::string testName = std::string(__FUNCTION__);
+    using type = uint32_t;
+    chain_t chain[1]={chain_t{0}};
+    type a[1] = {5};
+    type b[1] = {2};
+    type result[1]={0};
+    type expected_result = 7;
+
+    chain_t* chain_d;
+    type* a_d;
+    type* b_d;
+    type* result_d;
+    hipMalloc(&chain_d,sizeof(type));
+    hipMalloc(&a_d,sizeof(type));
+    hipMalloc(&b_d,sizeof(type));
+    hipMalloc(&result_d,sizeof(type));
+
+    hipMemcpy(chain_d, chain, sizeof(type), hipMemcpyHostToDevice);
+    hipMemcpy(a_d, a, sizeof(type), hipMemcpyHostToDevice);
+    hipMemcpy(b_d, b, sizeof(type), hipMemcpyHostToDevice);
+
+    hipDeviceSynchronize();
+    check_hip_error();
+
+    hipLaunchKernelGGL(kernel_chain_add, dim3(1), dim3(1), 0, 0,chain_d, a_d, b_d, result_d);
+    check_hip_error();
+    hipDeviceSynchronize();
+    check_hip_error();
+
+    hipMemcpy(&result, result_d, sizeof(type), hipMemcpyDeviceToHost);
+
+    bool isFailed = false;
+    if(result[0]!=expected_result){
+        isFailed = true;
+    }
+    
+    hipFree(a_d);
+    hipFree(b_d);
+    hipFree(result_d);
+    return std::make_pair(testName,!isFailed);
+}
+
+std::pair<std::string,bool> test_chain_madlo(){
+    std::string testName = std::string(__FUNCTION__);
+    using type = uint32_t;
+    chain_t chain[1]={chain_t{0}};
+    type a[1] = {5};
+    type b[1] = {2};
+    type c[1] = {4};
+    type result[1]={0};
+    type expected_result = 14;
+
+    chain_t* chain_d;
+    type* a_d;
+    type* b_d;
+    type* c_d;
+    type* result_d;
+    hipMalloc(&chain_d,sizeof(type));
+    hipMalloc(&a_d,sizeof(type));
+    hipMalloc(&b_d,sizeof(type));
+    hipMalloc(&c_d,sizeof(type));
+    hipMalloc(&result_d,sizeof(type));
+
+    hipMemcpy(chain_d, chain, sizeof(type), hipMemcpyHostToDevice);
+    hipMemcpy(a_d, a, sizeof(type), hipMemcpyHostToDevice);
+    hipMemcpy(b_d, b, sizeof(type), hipMemcpyHostToDevice);
+    hipMemcpy(c_d, c, sizeof(type), hipMemcpyHostToDevice);
+
+    hipDeviceSynchronize();
+    check_hip_error();
+
+    hipLaunchKernelGGL(kernel_chain_madlo, dim3(1), dim3(1), 0, 0,chain_d, a_d, b_d,c_d, result_d);
+    check_hip_error();
+    hipDeviceSynchronize();
+    check_hip_error();
+
+    hipMemcpy(&result, result_d, sizeof(type), hipMemcpyDeviceToHost);
+
+    bool isFailed = false;
+    if(result[0]!=expected_result){
+        isFailed = true;
+    }
+    
+    hipFree(a_d);
+    hipFree(b_d);
+    hipFree(c_d);
+    hipFree(result_d);
+    return std::make_pair(testName,!isFailed);
+}
+
+std::pair<std::string,bool> test_chain_madhi(){
+    std::string testName = std::string(__FUNCTION__);
+    using type = uint32_t;
+    chain_t chain[1]={chain_t{0}};
+    type a[1] = {0xffffffff};
+    type b[1] = {2};
+    type c[1] = {4};
+    type result[1]={0};
+    type expected_result = 5;
+
+    chain_t* chain_d;
+    type* a_d;
+    type* b_d;
+    type* c_d;
+    type* result_d;
+    hipMalloc(&chain_d,sizeof(type));
+    hipMalloc(&a_d,sizeof(type));
+    hipMalloc(&b_d,sizeof(type));
+    hipMalloc(&c_d,sizeof(type));
+    hipMalloc(&result_d,sizeof(type));
+
+    hipMemcpy(chain_d, chain, sizeof(type), hipMemcpyHostToDevice);
+    hipMemcpy(a_d, a, sizeof(type), hipMemcpyHostToDevice);
+    hipMemcpy(b_d, b, sizeof(type), hipMemcpyHostToDevice);
+    hipMemcpy(c_d, c, sizeof(type), hipMemcpyHostToDevice);
+
+    hipDeviceSynchronize();
+    check_hip_error();
+
+    hipLaunchKernelGGL(kernel_chain_madhi, dim3(1), dim3(1), 0, 0,chain_d, a_d, b_d,c_d, result_d);
+    check_hip_error();
+    hipDeviceSynchronize();
+    check_hip_error();
+
+    hipMemcpy(&result, result_d, sizeof(type), hipMemcpyDeviceToHost);
+
+    bool isFailed = false;
+    if(result[0]!=expected_result){
+        isFailed = true;
+    }
+    
+    hipFree(a_d);
+    hipFree(b_d);
+    hipFree(c_d);
+    hipFree(result_d);
+    return std::make_pair(testName,!isFailed);
+}
+
+std::pair<std::string,bool> test_madhic(){
+    std::string testName = std::string(__FUNCTION__);
+    using type = uint32_t;
+    type a[1] = {0xffffffff};
+    type b[1] = {2};
+    type c[1] = {4};
+    type result[1]={0};
+    type expected_result = 5;
+
+    type* a_d;
+    type* b_d;
+    type* c_d;
+    type* result_d;
+    hipMalloc(&a_d,sizeof(type));
+    hipMalloc(&b_d,sizeof(type));
+    hipMalloc(&c_d,sizeof(type));
+    hipMalloc(&result_d,sizeof(type));
+
+    hipMemcpy(a_d, a, sizeof(type), hipMemcpyHostToDevice);
+    hipMemcpy(b_d, b, sizeof(type), hipMemcpyHostToDevice);
+    hipMemcpy(c_d, c, sizeof(type), hipMemcpyHostToDevice);
+
+    hipDeviceSynchronize();
+    check_hip_error();
+
+    hipLaunchKernelGGL(kernel_madhic, dim3(1), dim3(1), 0, 0, a_d, b_d,c_d, result_d);
+    check_hip_error();
+    hipDeviceSynchronize();
+    check_hip_error();
+
+    hipMemcpy(&result, result_d, sizeof(type), hipMemcpyDeviceToHost);
+
+    bool isFailed = false;
+    if(result[0]!=expected_result){
+        isFailed = true;
+    }
+    
+    hipFree(a_d);
+    hipFree(b_d);
+    hipFree(c_d);
+    hipFree(result_d);
+    return std::make_pair(testName,!isFailed);
+}
+
+std::pair<std::string,bool> test_addc(){
+    std::string testName = std::string(__FUNCTION__);
+    using type = uint32_t;
+    type a[1] = {8};
+    type b[1] = {5};
+    type result[1]={0};
+    type expected_result = 13;
+
+    type* a_d;
+    type* b_d;
+    type* result_d;
+    hipMalloc(&a_d,sizeof(type));
+    hipMalloc(&b_d,sizeof(type));
+    hipMalloc(&result_d,sizeof(type));
+
+    hipMemcpy(a_d, a, sizeof(type), hipMemcpyHostToDevice);
+    hipMemcpy(b_d, b, sizeof(type), hipMemcpyHostToDevice);
+
+    hipDeviceSynchronize();
+    check_hip_error();
+
+    hipLaunchKernelGGL(kernel_addc, dim3(1), dim3(1), 0, 0, a_d, b_d, result_d);
+    check_hip_error();
+    hipDeviceSynchronize();
+    check_hip_error();
+
+    hipMemcpy(&result, result_d, sizeof(type), hipMemcpyDeviceToHost);
+
+    bool isFailed = false;
+    if(result[0]!=expected_result){
+        isFailed = true;
+    }
+    
+    hipFree(a_d);
+    hipFree(b_d);
+    hipFree(result_d);
+    return std::make_pair(testName,!isFailed);
+}
+
+std::pair<std::string,bool> test_addc_cc(){
+    std::string testName = std::string(__FUNCTION__);
+    using type = uint32_t;
+    type a[1] = {8};
+    type b[1] = {5};
+    type result[1]={0};
+    type expected_result = 13;
+
+    type* a_d;
+    type* b_d;
+    type* result_d;
+    hipMalloc(&a_d,sizeof(type));
+    hipMalloc(&b_d,sizeof(type));
+    hipMalloc(&result_d,sizeof(type));
+
+    hipMemcpy(a_d, a, sizeof(type), hipMemcpyHostToDevice);
+    hipMemcpy(b_d, b, sizeof(type), hipMemcpyHostToDevice);
+
+    hipDeviceSynchronize();
+    check_hip_error();
+
+    hipLaunchKernelGGL(kernel_addc_cc, dim3(1), dim3(1), 0, 0, a_d, b_d, result_d);
+    check_hip_error();
+    hipDeviceSynchronize();
+    check_hip_error();
+
+    hipMemcpy(&result, result_d, sizeof(type), hipMemcpyDeviceToHost);
+
+    bool isFailed = false;
+    if(result[0]!=expected_result){
+        isFailed = true;
+    }
+    
+    hipFree(a_d);
+    hipFree(b_d);
+    hipFree(result_d);
+    return std::make_pair(testName,!isFailed);
+}
+
+std::pair<std::string,bool> test_add_cc(){
+    std::string testName = std::string(__FUNCTION__);
+    using type = uint32_t;
+    type a[1] = {8};
+    type b[1] = {5};
+    type result[1]={0};
+    type expected_result = 13;
+
+    type* a_d;
+    type* b_d;
+    type* result_d;
+    hipMalloc(&a_d,sizeof(type));
+    hipMalloc(&b_d,sizeof(type));
+    hipMalloc(&result_d,sizeof(type));
+
+    hipMemcpy(a_d, a, sizeof(type), hipMemcpyHostToDevice);
+    hipMemcpy(b_d, b, sizeof(type), hipMemcpyHostToDevice);
+
+    hipDeviceSynchronize();
+    check_hip_error();
+
+    hipLaunchKernelGGL(kernel_add_cc, dim3(1), dim3(1), 0, 0, a_d, b_d, result_d);
+    check_hip_error();
+    hipDeviceSynchronize();
+    check_hip_error();
+
+    hipMemcpy(&result, result_d, sizeof(type), hipMemcpyDeviceToHost);
+
+    bool isFailed = false;
+    if(result[0]!=expected_result){
+        isFailed = true;
+    }
+    
+    hipFree(a_d);
+    hipFree(b_d);
+    hipFree(result_d);
+    return std::make_pair(testName,!isFailed);
+}
+
+std::pair<std::string,bool> test_fr_add_nvidia(){
+    std::string testName = std::string(__FUNCTION__);
+    uint32_t a[8] = {0xffffffff, 0xfffffffd, 3, 0xffffffff, 0xffffffff, 3, 0xffffffff, 3};
+    uint32_t b[8] = {1, 2, 2, 1, 2, 2, 1, 2};
+    uint32_t result[8]={0,0,0,0,0,0,0,0};
+    uint32_t expected_result[8] = {0, 0, 6, 0, 2, 6, 0, 6};
+
+    Fr* a_d;
+    Fr* b_d;
+    Fr* result_d;
+    auto copySize = 8 * sizeof(uint32_t);
+    hipMalloc(&a_d,copySize);
+    hipMalloc(&b_d,copySize);
+    hipMalloc(&result_d,copySize);
+
+    hipMemcpy(a_d, a, copySize, hipMemcpyHostToDevice);
+    hipMemcpy(b_d, b, copySize, hipMemcpyHostToDevice);
+
+    hipDeviceSynchronize();
+    check_hip_error();
+
+    hipLaunchKernelGGL(kernel_Fr_add_nvidia, dim3(1), dim3(1), 0, 0, a_d, b_d, result_d);
+    check_hip_error();
+    hipDeviceSynchronize();
+    check_hip_error();
+
+    hipMemcpy(&result, result_d, copySize, hipMemcpyDeviceToHost);
+
+    //flattening result
+    uint32_t flattenResult[8];
+    memcpy(flattenResult,&result,copySize);
+
+    bool isFailed = false;
+    //assert cudaExpected vs result
+    for (int i = 0; i < 8; ++i) {
+        if(flattenResult[i]!=expected_result[i]){
+            isFailed = true;
+            break;
+        }
+    }
+    
+    hipFree(a_d);
+    hipFree(b_d);
+    hipFree(result_d);
+    return std::make_pair(testName,!isFailed);
+}
+
+std::pair<std::string,bool> test_fr_sub_nvidia(){
+    std::string testName = std::string(__FUNCTION__);
+    uint32_t a[8] = {0, 3, 3, 3, 3, 3, 3, 3};
+    uint32_t b[8] = {1, 2, 2, 2, 2, 2, 2, 2};
+    uint32_t result[8]={0,0,0,0,0,0,0,0};
+    uint32_t expected_result[8] = {0xffffffff, 0, 1, 1, 1, 1, 1, 1};
+
+    Fr* a_d;
+    Fr* b_d;
+    Fr* result_d;
+    auto copySize = 8 * sizeof(uint32_t);
+    hipMalloc(&a_d,copySize);
+    hipMalloc(&b_d,copySize);
+    hipMalloc(&result_d,copySize);
+
+    hipMemcpy(a_d, a, copySize, hipMemcpyHostToDevice);
+    hipMemcpy(b_d, b, copySize, hipMemcpyHostToDevice);
+
+    hipDeviceSynchronize();
+    check_hip_error();
+
+    hipLaunchKernelGGL(kernel_Fr_sub_nvidia, dim3(1), dim3(1), 0, 0, a_d, b_d, result_d);
+    check_hip_error();
+    hipDeviceSynchronize();
+    check_hip_error();
+
+    hipMemcpy(&result, result_d, copySize, hipMemcpyDeviceToHost);
+
+    //flattening result
+    uint32_t flattenResult[8];
+    memcpy(flattenResult,&result,copySize);
+
+    bool isFailed = false;
+    //assert cudaExpected vs result
+    for (int i = 0; i < 8; ++i) {
+        if(flattenResult[i]!=expected_result[i]){
+            isFailed = true;
+            break;
+        }
+    }
+    
+    hipFree(a_d);
+    hipFree(b_d);
+    hipFree(result_d);
+    return std::make_pair(testName,!isFailed);
+}
+
+// std::pair<std::string,bool> test_add_with_carry_64(){
+//     std::string testName = std::string(__FUNCTION__);
+//     uint64_t a[1] = {8};
+//     uint64_t b[1] = {5};
+//     uint64_t result[1]={0};
+//     uint64_t expected_result = 13;
+
+//     uint64_t* a_d;
+//     uint64_t* b_d;
+//     uint64_t* result_d;
+//     hipMalloc(&a_d,sizeof(uint64_t));
+//     hipMalloc(&b_d,sizeof(uint64_t));
+//     hipMalloc(&result_d,sizeof(uint64_t));
+
+//     hipMemcpy(a_d, a, sizeof(uint64_t), hipMemcpyHostToDevice);
+//     hipMemcpy(b_d, b, sizeof(uint64_t), hipMemcpyHostToDevice);
+
+//     hipDeviceSynchronize();
+//     check_hip_error();
+
+//     hipLaunchKernelGGL(kernel_add_with_carry_64, dim3(1), dim3(1), 0, 0, a_d, b_d, result_d);
+//     check_hip_error();
+//     hipDeviceSynchronize();
+//     check_hip_error();
+
+//     hipMemcpy(&result, result_d, sizeof(uint64_t), hipMemcpyDeviceToHost);
+
+//     bool isFailed = false;
+//     if(result[0]!=expected_result){
+//         isFailed = true;
+//     }
+    
+//     hipFree(a_d);
+//     hipFree(b_d);
+//     hipFree(result_d);
+//     return std::make_pair(testName,!isFailed);
+// }
+
+std::pair<std::string,bool> test_add_with_carry_32(){
+    std::string testName = std::string(__FUNCTION__);
+    uint32_t a[1] = {8};
+    uint32_t b[1] = {5};
+    uint32_t result[1]={0};
+    uint32_t expected_result = 13;
+
+    uint32_t* a_d;
+    uint32_t* b_d;
+    uint32_t* result_d;
+    hipMalloc(&a_d,sizeof(uint32_t));
+    hipMalloc(&b_d,sizeof(uint32_t));
+    hipMalloc(&result_d,sizeof(uint32_t));
+
+    hipMemcpy(a_d, a, sizeof(uint32_t), hipMemcpyHostToDevice);
+    hipMemcpy(b_d, b, sizeof(uint32_t), hipMemcpyHostToDevice);
+
+    hipDeviceSynchronize();
+    check_hip_error();
+
+    hipLaunchKernelGGL(kernel_add_with_carry_32, dim3(1), dim3(1), 0, 0, a_d, b_d, result_d);
+    check_hip_error();
+    hipDeviceSynchronize();
+    check_hip_error();
+
+    hipMemcpy(&result, result_d, sizeof(uint32_t), hipMemcpyDeviceToHost);
+
+    bool isFailed = false;
+    if(result[0]!=expected_result){
+        isFailed = true;
+    }
+    
+    hipFree(a_d);
+    hipFree(b_d);
+    hipFree(result_d);
+    return std::make_pair(testName,!isFailed);
+}
 
 std::pair<std::string,bool> g1_add_test(){
     std::string testName = std::string(__FUNCTION__);
@@ -1428,16 +2237,13 @@ std::pair<std::string,bool> g1_add_test(){
 
 std::pair<std::string,bool> g1_add_mixed_test(){
     std::string testName = std::string(__FUNCTION__);
-    uint32_t a[36] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                     196605, 1980301312, 3289120770, 3958636555, 1405573306, 1598593111, 1884444485, 2010011731, 2723605613, 1543969431, 4202751123, 368467651,
-                      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+    uint32_t a[36] = {2395120562, 3786888445, 1582012131, 470272752, 484911279, 1876807493, 491778606, 3876892965, 3685902226, 2518471697, 2867656808, 334352122, 1178201815, 1888876881, 1421788681, 3266897916, 348304784, 1613866059, 3707460735, 71912215, 3029149043, 2201101821, 2758980691, 435057554, 2135400834, 700462646, 2425436445, 646334718, 3742877703, 1757280526, 645903899, 1746495021, 2009173599, 3050237561, 3090679167, 294266084};
 
-    uint32_t b[24] = {2210944813, 3909903087, 603786564, 3883152423, 2173389250, 2956470872, 809479795, 2862133481, 1088430826, 3104844840, 44451588, 226701902,
-                      2426309915, 1558163374, 4125809737, 2860931858, 1688959796, 3877074395, 4208292625, 4034170426, 2725679345, 1152044552, 819326913, 253933226};
+    uint32_t b[24] = {1593683062, 3217737125, 2123786011, 281700887, 925580346, 1172245260, 415663452, 1530194702, 2230925192, 3059137178, 896059255, 268931160, 3313020370, 3626838442, 796811132, 1531537046, 3504156260, 670005886, 1533786880, 3252591351, 2265285289, 3233527847, 287578874, 270363210};
 
-    uint32_t cudaExpected[36] = {2210944813, 3909903087, 603786564, 3883152423, 2173389250, 2956470872, 809479795, 2862133481, 1088430826, 3104844840, 44451588, 226701902,
-                                 2426309915, 1558163374, 4125809737, 2860931858, 1688959796, 3877074395, 4208292625, 4034170426, 2725679345, 1152044552, 819326913, 253933226,
-                                 196605, 1980301312, 3289120770, 3958636555, 1405573306, 1598593111, 1884444485, 2010011731, 2723605613, 1543969431, 4202751123, 368467651};
+    uint32_t cudaExpected[36] = {91982374, 2675151967, 4279854241, 3432570998, 2388875982, 2336020852, 2261253900, 3293165349, 1928294503, 595778821, 393623224, 127628426,
+                                 93338855, 900195312, 1919844805, 1195399157, 3751280066, 3810861134, 3064004963, 4199086728, 3858367916, 844711264, 4208694746, 136004056,
+                                 3616138652, 4161284733, 2276674391, 2835049215, 4144854416, 128803113, 1948865681, 2521176210, 1168104661, 2834712911, 3582460350, 59312263};
 
 
     G1_projective *a_d, *result_d;
