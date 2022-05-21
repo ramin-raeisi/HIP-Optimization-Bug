@@ -1,5 +1,0 @@
-make --dry-run --always-make --keep-going --print-directory
-make: Entering directory '/home/c9/ws/rr/HIP-Optimization-Bug'
-/opt/rocm/hip/bin/hipcc -std=c++14 -O3 -I/opt/include/ -o g1_add g1_add.cu
-make: Leaving directory '/home/c9/ws/rr/HIP-Optimization-Bug'
- 

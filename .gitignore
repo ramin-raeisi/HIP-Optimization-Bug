@@ -1,4 +1,8 @@
 *.xml
 .idea
-
+.vscode
 g1_add
+*save*
+*patch*
+g1_add_single
+g1_add_multi
