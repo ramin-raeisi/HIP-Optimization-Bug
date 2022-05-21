@@ -1,5 +1,5 @@
 #define __HIP_PLATFORM_AMD__
-#include <vector>
+
 #include "hip/hip_runtime.h"
 #include <stdint.h>
 #include <iostream>
@@ -46,6 +46,55 @@ typedef unsigned char uchar;
 #define AMD
 #endif
 
+// Returns a + b, puts the carry in b
+[[clang::optnone]]
+DEVICE ulong add_with_carry_64(ulong a, ulong *b) {
+    ulong lo;
+    uint32_t a_low = a;
+    uint32_t b_low = *b;
+    uint32_t add_low, add_high, temp;
+    asm volatile("v_add_u32 %0, %1, %2;" : "+v"(add_low) : "v"(a_low), "v"(b_low));
+    uint32_t a_high = a >> 32;
+    uint32_t b_high = (*b) >> 32;
+    asm volatile("v_addc_co_u32 %0, vcc, %1, %2, vcc;" : "+v"(add_high) : "v"(a_high), "v"(b_high): "vcc");
+    asm volatile("v_addc_co_u32 %0, vcc, 0, 0, vcc;" : "+v"(temp)::"vcc");
+    *b = temp;
+    lo = add_high;
+    lo = lo << 32;
+    lo = lo + add_low;
+    return lo;
+}
+
+// Returns a * b + c + d, puts the carry in d
+[[clang::optnone]]
+DEVICE ulong mac_with_carry_64(ulong a, ulong b, ulong c, ulong *d) {
+    ulong lo;
+    uint32_t a_lo, a_hi, b_lo, b_hi, c_lo, c_hi;
+    a_lo = a;
+    a_hi = a >> 32;
+    b_lo = b;
+    b_hi = b >> 32;
+    c_lo = c;
+    c_hi = c >> 32;
+
+    uint32_t temp;
+    uint32_t temp_carry;
+    asm volatile("v_mul_lo_u32 %0, %1, %2;" : "+v"(temp): "v"(a_lo), "v"(b_lo));
+    lo = temp;
+
+    asm volatile("v_mul_lo_u32 %0, %1, %2;" : "+v"(temp): "v"(a_hi), "v"(b_lo));
+    ulong res_temp1 = temp;
+    asm volatile("v_mul_lo_u32 %0, %1, %2;" : "+v"(temp): "v"(a_lo), "v"(b_hi));
+    ulong res_temp2 = temp;
+    lo = add_with_carry_64(res_temp1, &res_temp2);
+    lo = lo << 32;
+    lo = add_with_carry_64(lo, &res_temp2);
+
+    asm volatile("v_addc_co_u32 %0, vcc, 0, 0, vcc;" : "+v"(temp)::"vcc");
+    *d = temp;
+    return lo;
+}
+
 // Returns a * b + c + d, puts the carry in d
 DEVICE uint mac_with_carry_32(uint a, uint b, uint c, uint *d) {
     ulong res = (ulong) a * b + c + *d;
@@ -54,13 +103,11 @@ DEVICE uint mac_with_carry_32(uint a, uint b, uint c, uint *d) {
 }
 
 // Returns a + b, puts the carry in b
+[[clang::optnone]]
 DEVICE uint add_with_carry_32(uint a, uint *b) {
     uint lo, hi;
-    asm volatile("v_add_co_u32 %0, vcc, %2, %3;\r\n"
-                "v_addc_co_u32 %1, vcc, 0, 0, vcc;\r\n"
-                : "+v"(lo), "+v"(hi) : "v"(a), "v"(*b) : "vcc");
-                
-                // "v_add_co_u32 %0, vcc, %0, 0;\r\n"
+    asm volatile("v_add_u32 %0, %1, %2;" : "+v"(lo): "v"(a), "v"(*b));
+    asm volatile("v_addc_co_u32 %0, vcc, 0, 0, vcc;" : "+v"(hi)::"vcc");
     *b = hi;
     return lo;
 }
@@ -69,73 +116,92 @@ typedef uint uint32_t;
 typedef int int32_t;
 typedef uint limb;
 
-DEVICE inline uint32_t add_cc(uint32_t a, uint32_t b) {
-  uint32_t r;
-  asm volatile("v_add_co_u32 %0, vcc, %1, %2" : "+v"(r): "v"(a), "v"(b) : "vcc");
-  return r;
+[[clang::optnone]]
+DEVICE uint32_t add_cc(uint32_t a, uint32_t b) {
+    uint32_t r;
+    asm volatile("v_add_co_u32 %0, %1, %2" : "+v"(r): "v"(a), "v"(b));
+    return r;
 }
 
-DEVICE inline uint32_t addc_cc(uint32_t a, uint32_t b) {
+[[clang::optnone]]
+DEVICE uint32_t addc_cc(uint32_t a, uint32_t b) {
     uint32_t r;
     asm volatile("v_addc_co_u32 %0, vcc, %1, %2, vcc;" : "+v"(r): "v"(a), "v"(b): "vcc");
     return r;
 }
 
-DEVICE inline uint32_t addc(uint32_t a, uint32_t b) {
-    uint32_t r = 0;
-    asm volatile("v_addc_co_u32 %0, vcc, %1, %2, vcc;" : "+v"(r) : "v"(a), "v"(b) : "vcc");
+[[clang::optnone]]
+DEVICE uint32_t addc(uint32_t a, uint32_t b) {
+    uint32_t r;
+    asm volatile("v_addc_co_u32 %0, vcc, %1, %2, vcc;" : "+v"(r): "v"(a), "v"(b): "vcc");
+    //To reset carry
+    asm volatile("v_add_co_u32 %0, %0, %1;" : "+v"(r) : "v"(0));
     return r;
 }
 
-DEVICE inline uint32_t madlo_cc(uint32_t a, uint32_t b, uint32_t c) {
-  uint32_t r;
-#if defined(MULTI_ASM)
-  asm volatile("v_mul_lo_u32 %0, %1, %2" : "+v"(r): "v"(a), "v"(b));
-  asm volatile("v_add_co_u32 %0, vcc, %0, %1" : "+v"(r): "v"(c) : "vcc");
-#else
-    asm volatile("v_mul_lo_u32 %0, %1, %2;\r\n"
-                 "v_add_co_u32 %0, vcc, %0, %3;\r\n"
-                 : "+v"(r) : "v"(a), "v"(b), "v"(c) : "vcc");
-#endif
+[[clang::optnone]]
+DEVICE uint32_t madlo(uint32_t a, uint32_t b, uint32_t c) {
+    //RR TODO:
+    //Not used anywhere??????????
+    uint32_t r;
+    asm volatile("v_mul_lo_u32 %0, %1, %2" : "+v"(r): "v"(a), "v"(b));
+    asm volatile("v_add_co_u32 %0, %0, %1" : "+v"(r): "v"(c));
     return r;
 }
 
-DEVICE inline uint32_t madloc_cc(uint32_t a, uint32_t b, uint32_t c) {
-  uint32_t r;
-#if defined(MULTI_ASM)
-  asm volatile("v_mul_lo_u32 %0, %1, %2" : "+v"(r): "v"(a), "v"(b));
-  asm volatile("v_addc_co_u32 %0, vcc, %0, %1, vcc" : "+v"(r): "v"(c): "vcc");
-#else
-    asm volatile("v_mul_lo_u32 %0, %1, %2;\r\n"
-                 "v_addc_co_u32 %0, vcc, %0, %3, vcc;\r\n" 
-                  : "+v"(r): "v"(a), "v"(b), "v"(c): "vcc");
-#endif
+DEVICE uint32_t madlo_cc(uint32_t a, uint32_t b, uint32_t c) {
+    uint32_t r;
+    asm volatile("v_mul_lo_u32 %0, %1, %2" : "+v"(r): "v"(a), "v"(b));
+    asm volatile("v_add_co_u32 %0, %0, %1" : "+v"(r): "v"(c));
     return r;
 }
 
-DEVICE inline uint32_t madhi_cc(uint32_t a, uint32_t b, uint32_t c) {
-  uint32_t r;
-#if defined(MULTI_ASM)
-  asm volatile("v_mul_hi_u32 %0, %1, %2" : "+v"(r): "v"(a), "v"(b));
-  asm volatile("v_add_co_u32 %0, vcc, %0, %1" : "+v"(r): "v"(c) : "vcc");
-#else
-    asm volatile("v_mul_hi_u32 %0, %1, %2;\r\n" 
-                 "v_add_co_u32 %0, vcc, %0, %3;\r\n"
-                 : "+v"(r) : "v"(a), "v"(b), "v"(c) : "vcc");
-#endif
+DEVICE uint32_t madloc_cc(uint32_t a, uint32_t b, uint32_t c) {
+    uint32_t r;
+    asm volatile("v_mul_lo_u32 %0, %1, %2" : "+v"(r): "v"(a), "v"(b));
+    asm volatile("v_addc_co_u32 %0, vcc, %0, %1, vcc" : "+v"(r): "v"(c): "vcc");
     return r;
 }
 
-DEVICE inline uint32_t madhic_cc(uint32_t a, uint32_t b, uint32_t c) {
-  uint32_t r;
-#if defined(MULTI_ASM)  
-  asm volatile("v_mul_hi_u32 %0, %1, %2;" : "+v"(r): "v"(a), "v"(b));
-  asm volatile("v_addc_co_u32 %0, vcc, %0, %1, vcc;" : "+v"(r): "v"(c): "vcc");
-#else
-    asm volatile("v_mul_hi_u32 %0, %1, %2;\r\n"
-                 "v_addc_co_u32 %0, vcc, %0, %3, vcc;\r\n"
-                 : "+v"(r) : "v"(a), "v"(b), "v"(c) : "vcc");
-#endif
+[[clang::optnone]]
+DEVICE uint32_t madloc(uint32_t a, uint32_t b, uint32_t c) {
+    //RR TODO:
+    //Not used anywhere??????????
+    uint32_t r;
+    asm volatile("v_mul_lo_u32 %0, %1, %2" : "+v"(r): "v"(a), "v"(b));
+    asm volatile("v_addc_co_u32 %0, vcc, %0, %1, vcc" : "+v"(r): "v"(c): "vcc");
+    return r;
+}
+
+DEVICE uint32_t madhi(uint32_t a, uint32_t b, uint32_t c) {
+    //RR TODO:
+    //Not used anywhere??????????
+    uint32_t r;
+    asm volatile("v_mul_hi_u32 %0, %1, %2" : "+v"(r): "v"(a), "v"(b));
+    asm volatile("v_add_u32 %0, %0, %1" : "+v"(r): "v"(c));
+    return r;
+}
+
+DEVICE uint32_t madhi_cc(uint32_t a, uint32_t b, uint32_t c) {
+    uint32_t r;
+    asm volatile("v_mul_hi_u32 %0, %1, %2" : "+v"(r): "v"(a), "v"(b));
+    asm volatile("v_add_co_u32 %0, %0, %1" : "+v"(r): "v"(c));
+    return r;
+}
+
+DEVICE uint32_t madhic_cc(uint32_t a, uint32_t b, uint32_t c) {
+    uint32_t r;
+    asm volatile("v_mul_hi_u32 %0, %1, %2;" : "+v"(r): "v"(a), "v"(b));
+    asm volatile("v_addc_co_u32 %0, vcc, %0, %1, vcc;" : "+v"(r): "v"(c): "vcc");
+    return r;
+}
+
+DEVICE uint32_t madhic(uint32_t a, uint32_t b, uint32_t c) {
+    uint32_t r;
+    asm volatile("v_mul_hi_u32 %0, %1, %2" : "+v"(r): "v"(a), "v"(b));
+    asm volatile("v_addc_co_u32 %0, vcc, %0, %1, vcc" : "+v"(r): "v"(c): "vcc");
+    //To reset carry
+    asm volatile("v_add_co_u32 %0, %0, %1" : "+v"(r): "v"(0));
     return r;
 }
 
@@ -198,36 +264,28 @@ CONSTANT Fr Fr_R2 = {{4092763245, 3382307216, 2274516003, 728559051, 1918122383,
 CONSTANT Fr Fr_ZERO = {{0, 0, 0, 0, 0, 0, 0, 0}};
 
 DEVICE Fr Fr_sub_nvidia(Fr a, Fr b) {
-
-    asm volatile("v_sub_co_u32 %0, vcc, %0, %8;\r\n"
-                "v_subb_co_u32 %1, vcc, %1, %9, vcc;\r\n"
-                "v_subb_co_u32 %2, vcc, %2, %10, vcc;\r\n"
-                "v_subb_co_u32 %3, vcc, %3, %11, vcc;\r\n"
-                "v_subb_co_u32 %4, vcc, %4, %12, vcc;\r\n"
-                "v_subb_co_u32 %5, vcc, %5, %13, vcc;\r\n"
-                "v_subb_co_u32 %6, vcc, %6, %14, vcc;\r\n"
-                "v_subb_co_u32 %7, vcc, %7, %15, vcc;\r\n"
-                : "+v"(a.val[0]), "+v"(a.val[1]), "+v"(a.val[2]), "+v"(a.val[3]), "+v"(a.val[4]), "+v"(a.val[5]), "+v"(a.val[6]), "+v"(a.val[7])
-                : "v"(b.val[0]), "v"(b.val[1]), "v"(b.val[2]), "v"(b.val[3]), "v"(b.val[4]), "v"(b.val[5]), "v"(b.val[6]), "v"(b.val[7]) : "vcc");
-    
-                // "v_sub_co_u32 %7, vcc, %7, 0;\r\n"
+    asm volatile("v_sub_co_u32 %0, %0, %1" : "+v"(a.val[0]): "v"(b.val[0]));
+    asm volatile("v_subb_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[1]): "v"(b.val[1]): "vcc");
+    asm volatile("v_subb_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[2]): "v"(b.val[2]): "vcc");
+    asm volatile("v_subb_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[3]): "v"(b.val[3]): "vcc");
+    asm volatile("v_subb_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[4]): "v"(b.val[4]): "vcc");
+    asm volatile("v_subb_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[5]): "v"(b.val[5]): "vcc");
+    asm volatile("v_subb_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[6]): "v"(b.val[6]): "vcc");
+    asm volatile("v_subb_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[7]): "v"(b.val[7]): "vcc");
+    asm volatile("v_sub_co_u32 %0, %0, %1" : "+v"(a.val[7]): "v"(0));
     return a;
 }
 
 DEVICE Fr Fr_add_nvidia(Fr a, Fr b) {
-
-    asm volatile("v_add_co_u32 %0, vcc, %0, %8;\r\n"
-                "v_addc_co_u32 %1, vcc, %1, 9, vcc;\r\n"
-                "v_addc_co_u32 %2, vcc, %2, %10, vcc;\r\n"
-                "v_addc_co_u32 %3, vcc, %3, %11, vcc;\r\n"
-                "v_addc_co_u32 %4, vcc, %4, %12, vcc;\r\n"
-                "v_addc_co_u32 %5, vcc, %5, %13, vcc;\r\n"
-                "v_addc_co_u32 %6, vcc, %6, %14, vcc;\r\n"
-                "v_addc_co_u32 %7, vcc, %7, %15, vcc;\r\n"
-                : "+v"(a.val[0]), "+v"(a.val[1]), "+v"(a.val[2]), "+v"(a.val[3]), "+v"(a.val[4]), "+v"(a.val[5]), "+v"(a.val[6]), "+v"(a.val[7])
-                : "v"(b.val[0]), "v"(b.val[1]), "v"(b.val[2]), "v"(b.val[3]), "v"(b.val[4]), "v"(b.val[5]), "v"(b.val[6]), "v"(b.val[7]) : "vcc");
-   
-                // "v_add_co_u32 %7, vcc, %7, 0;\r\n"
+    asm volatile("v_add_co_u32 %0, %0, %1" : "+v"(a.val[0]): "v"(b.val[0]));
+    asm volatile("v_addc_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[1]): "v"(b.val[1]): "vcc");
+    asm volatile("v_addc_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[2]): "v"(b.val[2]): "vcc");
+    asm volatile("v_addc_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[3]): "v"(b.val[3]): "vcc");
+    asm volatile("v_addc_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[4]): "v"(b.val[4]): "vcc");
+    asm volatile("v_addc_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[5]): "v"(b.val[5]): "vcc");
+    asm volatile("v_addc_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[6]): "v"(b.val[6]): "vcc");
+    asm volatile("v_addc_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[7]): "v"(b.val[7]): "vcc");
+    asm volatile("v_add_co_u32 %0, %0, %1" : "+v"(a.val[7]): "v"(0));
     return a;
 }
 
@@ -246,6 +304,7 @@ DEVICE Fr Fr_add_nvidia(Fr a, Fr b) {
 // Greater than or equal
 DEVICE bool Fr_gte(Fr a, Fr b) {
     for (char i = Fr_LIMBS - 1; i >= 0; i--) {
+        //RR TODO: Recheck logic
         if (a.val[i] > b.val[i])
             return true;
         if (a.val[i] < b.val[i])
@@ -611,42 +670,37 @@ CONSTANT Fq Fq_ZERO = {{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}};
 
 
 DEVICE Fq Fq_sub_nvidia(Fq a, Fq b) {
-    asm volatile("v_sub_co_u32 %0, vcc, %0, %12;\r\n"
-                "v_subb_co_u32 %1, vcc, %1, %13, vcc;\r\n"
-                "v_subb_co_u32 %2, vcc, %2, %14, vcc;\r\n"
-                "v_subb_co_u32 %3, vcc, %3, %15, vcc;\r\n"
-                "v_subb_co_u32 %4, vcc, %4, %16, vcc;\r\n"
-                "v_subb_co_u32 %5, vcc, %5, %17, vcc;\r\n"
-                "v_subb_co_u32 %6, vcc, %6, %18, vcc;\r\n"
-                "v_subb_co_u32 %7, vcc, %7, %19, vcc;\r\n"
-                "v_subb_co_u32 %8, vcc, %8, %20, vcc;\r\n"
-                "v_subb_co_u32 %9, vcc, %9, %21, vcc;\r\n"
-                "v_subb_co_u32 %10, vcc, %10, %22, vcc;\r\n"
-                "v_subb_co_u32 %11, vcc, %11, %23, vcc;\r\n"
-                : "+v"(a.val[0]), "+v"(a.val[1]), "+v"(a.val[2]), "+v"(a.val[3]), "+v"(a.val[4]), "+v"(a.val[5]), "+v"(a.val[6]), "+v"(a.val[7]), "+v"(a.val[8]), "+v"(a.val[9]), "+v"(a.val[10]), "+v"(a.val[11])
-                : "v"(b.val[0]), "v"(b.val[1]), "v"(b.val[2]), "v"(b.val[3]), "v"(b.val[4]), "v"(b.val[5]), "v"(b.val[6]), "v"(b.val[7]), "v"(b.val[8]), "v"(b.val[9]), "v"(b.val[10]), "v"(b.val[11]) : "vcc");
-    
-                // "v_sub_co_u32 %11, vcc, %11, 0;\r\n"
+    asm volatile("v_sub_co_u32 %0, %0, %1" : "+v"(a.val[0]): "v"(b.val[0]));
+    asm volatile("v_subb_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[1]): "v"(b.val[1]): "vcc");
+    asm volatile("v_subb_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[2]): "v"(b.val[2]): "vcc");
+    asm volatile("v_subb_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[3]): "v"(b.val[3]): "vcc");
+    asm volatile("v_subb_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[4]): "v"(b.val[4]): "vcc");
+    asm volatile("v_subb_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[5]): "v"(b.val[5]): "vcc");
+    asm volatile("v_subb_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[6]): "v"(b.val[6]): "vcc");
+    asm volatile("v_subb_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[7]): "v"(b.val[7]): "vcc");
+    asm volatile("v_subb_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[8]): "v"(b.val[8]): "vcc");
+    asm volatile("v_subb_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[9]): "v"(b.val[9]): "vcc");
+    asm volatile("v_subb_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[10]): "v"(b.val[10]): "vcc");
+    asm volatile("v_subb_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[11]): "v"(b.val[11]): "vcc");
+    asm volatile("v_sub_co_u32 %0, %0, %1" : "+v"(a.val[11]): "v"(0));
     return a;
 }
 
-DEVICE Fq Fq_add_nvidia(Fq a, Fq b) {
-    asm volatile("v_add_co_u32 %0, vcc, %0, %12;\r\n"
-            "v_addc_co_u32 %1, vcc, %1, %13, vcc;\r\n"
-            "v_addc_co_u32 %2, vcc, %2, %14, vcc;\r\n"
-            "v_addc_co_u32 %3, vcc, %3, %15, vcc;\r\n"
-            "v_addc_co_u32 %4, vcc, %4, %16, vcc;\r\n"
-            "v_addc_co_u32 %5, vcc, %5, %17, vcc;\r\n"
-            "v_addc_co_u32 %6, vcc, %6, %18, vcc;\r\n"
-            "v_addc_co_u32 %7, vcc, %7, %19, vcc;\r\n"
-            "v_addc_co_u32 %8, vcc, %8, %20, vcc;\r\n"
-            "v_addc_co_u32 %9, vcc, %9, %21, vcc;\r\n"
-            "v_addc_co_u32 %10, vcc, %10, %22, vcc;\r\n"
-            "v_addc_co_u32 %11, vcc, %11, %23, vcc;\r\n"
-            : "+v"(a.val[0]), "+v"(a.val[1]), "+v"(a.val[2]), "+v"(a.val[3]), "+v"(a.val[4]), "+v"(a.val[5]), "+v"(a.val[6]), "+v"(a.val[7]), "+v"(a.val[8]), "+v"(a.val[9]), "+v"(a.val[10]), "+v"(a.val[11])
-            : "v"(b.val[0]), "v"(b.val[1]), "v"(b.val[2]), "v"(b.val[3]), "v"(b.val[4]), "v"(b.val[5]), "v"(b.val[6]), "v"(b.val[7]), "v"(b.val[8]), "v"(b.val[9]), "v"(b.val[10]), "v"(b.val[11]) : "vcc");
 
-            // "v_add_co_u32 %11, vcc, %11, 0;\r\n"
+DEVICE Fq Fq_add_nvidia(Fq a, Fq b) {
+    asm volatile("v_add_co_u32 %0, %0, %1" : "+v"(a.val[0]): "v"(b.val[0]));
+    asm volatile("v_addc_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[1]): "v"(b.val[1]): "vcc");
+    asm volatile("v_addc_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[2]): "v"(b.val[2]): "vcc");
+    asm volatile("v_addc_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[3]): "v"(b.val[3]): "vcc");
+    asm volatile("v_addc_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[4]): "v"(b.val[4]): "vcc");
+    asm volatile("v_addc_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[5]): "v"(b.val[5]): "vcc");
+    asm volatile("v_addc_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[6]): "v"(b.val[6]): "vcc");
+    asm volatile("v_addc_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[7]): "v"(b.val[7]): "vcc");
+    asm volatile("v_addc_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[8]): "v"(b.val[8]): "vcc");
+    asm volatile("v_addc_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[9]): "v"(b.val[9]): "vcc");
+    asm volatile("v_addc_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[10]): "v"(b.val[10]): "vcc");
+    asm volatile("v_addc_co_u32 %0, vcc, %0, %1, vcc" : "+v"(a.val[11]): "v"(b.val[11]): "vcc");
+    asm volatile("v_add_co_u32 %0, %0, %1" : "+v"(a.val[11]): "v"(0));
     return a;
 }
 
@@ -665,6 +719,7 @@ DEVICE Fq Fq_add_nvidia(Fq a, Fq b) {
 // Greater than or equal
 DEVICE bool Fq_gte(Fq a, Fq b) {
     for (char i = Fq_LIMBS - 1; i >= 0; i--) {
+        //RR TODO: Recheck logic
         if (a.val[i] > b.val[i])
             return true;
         if (a.val[i] < b.val[i])
@@ -950,66 +1005,6 @@ DEVICE Fq Fq_double(Fq a) {
     return a;
 }
 
-#define Fq2_LIMB_BITS Fq_LIMB_BITS
-#define Fq2_ZERO ((Fq2){Fq_ZERO, Fq_ZERO})
-#define Fq2_ONE ((Fq2){Fq_ONE, Fq_ZERO})
-
-typedef struct {
-  Fq c0;
-  Fq c1;
-} Fq2; // Represents: c0 + u * c1
-
-DEVICE bool Fq2_eq(Fq2 a, Fq2 b) {
-  return Fq_eq(a.c0, b.c0) && Fq_eq(a.c1, b.c1);
-}
-DEVICE Fq2 Fq2_sub(Fq2 a, Fq2 b) {
-  a.c0 = Fq_sub(a.c0, b.c0);
-  a.c1 = Fq_sub(a.c1, b.c1);
-  return a;
-}
-DEVICE Fq2 Fq2_add(Fq2 a, Fq2 b) {
-  a.c0 = Fq_add(a.c0, b.c0);
-  a.c1 = Fq_add(a.c1, b.c1);
-  return a;
-}
-DEVICE Fq2 Fq2_double(Fq2 a) {
-  a.c0 = Fq_double(a.c0);
-  a.c1 = Fq_double(a.c1);
-  return a;
-}
-
-/*
- * (a_0 + u * a_1)(b_0 + u * b_1) = a_0 * b_0 - a_1 * b_1 + u * (a_0 * b_1 + a_1 * b_0)
- * Therefore:
- * c_0 = a_0 * b_0 - a_1 * b_1
- * c_1 = (a_0 * b_1 + a_1 * b_0) = (a_0 + a_1) * (b_0 + b_1) - a_0 * b_0 - a_1 * b_1
- */
-DEVICE Fq2 Fq2_mul(Fq2 a, Fq2 b) {
-  const Fq aa = Fq_mul(a.c0, b.c0);
-  const Fq bb = Fq_mul(a.c1, b.c1);
-  const Fq o = Fq_add(b.c0, b.c1);
-  a.c1 = Fq_add(a.c1, a.c0);
-  a.c1 = Fq_mul(a.c1, o);
-  a.c1 = Fq_sub(a.c1, aa);
-  a.c1 = Fq_sub(a.c1, bb);
-  a.c0 = Fq_sub(aa, bb);
-  return a;
-}
-
-/*
- * (a_0 + u * a_1)(a_0 + u * a_1) = a_0 ^ 2 - a_1 ^ 2 + u * 2 * a_0 * a_1
- * Therefore:
- * c_0 = (a_0 * a_0 - a_1 * a_1) = (a_0 + a_1)(a_0 - a_1)
- * c_1 = 2 * a_0 * a_1
- */
-DEVICE Fq2 Fq2_sqr(Fq2 a) {
-  const Fq ab = Fq_mul(a.c0, a.c1);
-  const Fq c0c1 = Fq_add(a.c0, a.c1);
-  a.c0 = Fq_mul(Fq_sub(a.c0, a.c1), c0c1);
-  a.c1 = Fq_double(ab);
-  return a;
-}
-
 
 // Elliptic curve operations (Short Weierstrass Jacobian form)
 
@@ -1101,140 +1096,20 @@ DEVICE G1_projective G1_add_mixed(G1_projective a, G1_affine b) {
     return ret;
 }
 
-#define G2_ZERO ((G2_projective){Fq2_ZERO, Fq2_ONE, Fq2_ZERO})
-
-typedef struct {
-  Fq2 x;
-  Fq2 y;
-} G2_affine;
-
-typedef struct {
-  Fq2 x;
-  Fq2 y;
-  Fq2 z;
-} G2_projective;
-
-// http://www.hyperelliptic.org/EFD/g1p/auto-shortw-jacobian-0.html#doubling-dbl-2009-l
-DEVICE G2_projective G2_double(G2_projective inp) {
-  const Fq2 local_zero = Fq2_ZERO;
-  if(Fq2_eq(inp.z, local_zero)) {
-      return inp;
-  }
-
-  const Fq2 a = Fq2_sqr(inp.x); // A = X1^2
-  const Fq2 b = Fq2_sqr(inp.y); // B = Y1^2
-  Fq2 c = Fq2_sqr(b); // C = B^2
-
-  // D = 2*((X1+B)2-A-C)
-  Fq2 d = Fq2_add(inp.x, b);
-  d = Fq2_sqr(d); d = Fq2_sub(Fq2_sub(d, a), c); d = Fq2_double(d);
-
-  const Fq2 e = Fq2_add(Fq2_double(a), a); // E = 3*A
-  const Fq2 f = Fq2_sqr(e);
-
-  inp.z = Fq2_mul(inp.y, inp.z); inp.z = Fq2_double(inp.z); // Z3 = 2*Y1*Z1
-  inp.x = Fq2_sub(Fq2_sub(f, d), d); // X3 = F-2*D
-
-  // Y3 = E*(D-X3)-8*C
-  c = Fq2_double(c); c = Fq2_double(c); c = Fq2_double(c);
-  inp.y = Fq2_sub(Fq2_mul(Fq2_sub(d, inp.x), e), c);
-
-  return inp;
+__device__ void print_Fq(const char *name, Fq in, const char *end) {
+    printf("%s=>", name);
+    for (int i = 0; i < Fq_LIMBS; i++) {
+        printf("%u,", in.val[i]);
+    }
+    printf("%s", end);
 }
 
-// http://www.hyperelliptic.org/EFD/g1p/auto-shortw-jacobian-0.html#addition-madd-2007-bl
-DEVICE G2_projective G2_add_mixed(G2_projective a, G2_affine b) {
-  const Fq2 local_zero = Fq2_ZERO;
-  if(Fq2_eq(a.z, local_zero)) {
-    const Fq2 local_one = Fq2_ONE;
-    a.x = b.x;
-    a.y = b.y;
-    a.z = local_one;
-    return a;
-  }
-
-  const Fq2 z1z1 = Fq2_sqr(a.z);
-  const Fq2 u2 = Fq2_mul(b.x, z1z1);
-  const Fq2 s2 = Fq2_mul(Fq2_mul(b.y, a.z), z1z1);
-
-  if(Fq2_eq(a.x, u2) && Fq2_eq(a.y, s2)) {
-      return G2_double(a);
-  }
-
-  const Fq2 h = Fq2_sub(u2, a.x); // H = U2-X1
-  const Fq2 hh = Fq2_sqr(h); // HH = H^2
-  Fq2 i = Fq2_double(hh); i = Fq2_double(i); // I = 4*HH
-  Fq2 j = Fq2_mul(h, i); // J = H*I
-  Fq2 r = Fq2_sub(s2, a.y); r = Fq2_double(r); // r = 2*(S2-Y1)
-  const Fq2 v = Fq2_mul(a.x, i);
-
-  G2_projective ret;
-
-  // X3 = r^2 - J - 2*V
-  ret.x = Fq2_sub(Fq2_sub(Fq2_sqr(r), j), Fq2_double(v));
-
-  // Y3 = r*(V-X3)-2*Y1*J
-  j = Fq2_mul(a.y, j); j = Fq2_double(j);
-  ret.y = Fq2_sub(Fq2_mul(Fq2_sub(v, ret.x), r), j);
-
-  // Z3 = (Z1+H)^2-Z1Z1-HH
-  ret.z = Fq2_add(a.z, h); ret.z = Fq2_sub(Fq2_sub(Fq2_sqr(ret.z), z1z1), hh);
-  return ret;
+__device__ void print_G1(const char *name, G1_projective g1, const char *end) {
+    printf("%s==>", name);
+    print_Fq("x", g1.x, "*");
+    print_Fq("y", g1.y, "*");
+    print_Fq("z", g1.z, "\n");
 }
-
-// http://www.hyperelliptic.org/EFD/g1p/auto-shortw-jacobian-0.html#addition-add-2007-bl
-DEVICE G2_projective G2_add(G2_projective a, G2_projective b) {
-
-  const Fq2 local_zero = Fq2_ZERO;
-  if(Fq2_eq(a.z, local_zero)) return b;
-  if(Fq2_eq(b.z, local_zero)) return a;
-
-  const Fq2 z1z1 = Fq2_sqr(a.z); // Z1Z1 = Z1^2
-  const Fq2 z2z2 = Fq2_sqr(b.z); // Z2Z2 = Z2^2
-  const Fq2 u1 = Fq2_mul(a.x, z2z2); // U1 = X1*Z2Z2
-  const Fq2 u2 = Fq2_mul(b.x, z1z1); // U2 = X2*Z1Z1
-  Fq2 s1 = Fq2_mul(Fq2_mul(a.y, b.z), z2z2); // S1 = Y1*Z2*Z2Z2
-  const Fq2 s2 = Fq2_mul(Fq2_mul(b.y, a.z), z1z1); // S2 = Y2*Z1*Z1Z1
-
-  if(Fq2_eq(u1, u2) && Fq2_eq(s1, s2))
-    return G2_double(a);
-  else {
-    const Fq2 h = Fq2_sub(u2, u1); // H = U2-U1
-    Fq2 i = Fq2_double(h); i = Fq2_sqr(i); // I = (2*H)^2
-    const Fq2 j = Fq2_mul(h, i); // J = H*I
-    Fq2 r = Fq2_sub(s2, s1); r = Fq2_double(r); // r = 2*(S2-S1)
-    const Fq2 v = Fq2_mul(u1, i); // V = U1*I
-    a.x = Fq2_sub(Fq2_sub(Fq2_sub(Fq2_sqr(r), j), v), v); // X3 = r^2 - J - 2*V
-
-    // Y3 = r*(V - X3) - 2*S1*J
-    a.y = Fq2_mul(Fq2_sub(v, a.x), r);
-    s1 = Fq2_mul(s1, j); s1 = Fq2_double(s1); // S1 = S1 * J * 2
-    a.y = Fq2_sub(a.y, s1);
-
-    // Z3 = ((Z1+Z2)^2 - Z1Z1 - Z2Z2)*H
-    a.z = Fq2_add(a.z, b.z); a.z = Fq2_sqr(a.z);
-    a.z = Fq2_sub(Fq2_sub(a.z, z1z1), z2z2);
-    a.z = Fq2_mul(a.z, h);
-
-    return a;
-  }
-}
-
-
-// __device__ void print_Fq(const char *name, Fq in, const char *end) {
-//     printf("%s=>", name);
-//     for (int i = 0; i < Fq_LIMBS; i++) {
-//         printf("%u,", in.val[i]);
-//     }
-//     printf("%s", end);
-// }
-
-// __device__ void print_G1(const char *name, G1_projective g1, const char *end) {
-//     printf("%s==>", name);
-//     print_Fq("x", g1.x, "*");
-//     print_Fq("y", g1.y, "*");
-//     print_Fq("z", g1.z, "\n");
-// }
 
 // http://www.hyperelliptic.org/EFD/g1p/auto-shortw-jacobian-0.html#addition-add-2007-bl
 DEVICE G1_projective G1_add(G1_projective a, G1_projective b) {
@@ -1287,63 +1162,21 @@ KERNEL void kernel_G1_add(G1_projective *a, G1_projective *b, G1_projective *res
     *result = G1_add(*a, *b);
 }
 
-KERNEL void kernel_G1_double(G1_projective *inp, G1_projective *result) {
-  *result = G1_double(*inp);
-}
-
-KERNEL void kernel_G2_double(G2_projective *inp, G2_projective *result) {
-  *result = G2_double(*inp);
-}
-
-KERNEL void kernel_G2_add_mixed(G2_projective *a, G2_affine *b, G2_projective *result) {
-  *result = G2_add_mixed(*a, *b);
-}
-
-KERNEL void kernel_G2_add(G2_projective *a, G2_projective *b, G2_projective *result) {
-  *result = G2_add(*a, *b);
-}
-
-void print_fq(Fq in,Fq exp,const char* label,const char* end){
-    std::cout << label;
+void print_G1_project(G1_projective in) {
+    std::cout << "x: ";
     for (int i = 0; i < 12; i++) {
-        std::string color = in.val[i]==exp.val[i] ? "\033[1;32m" : "\033[1;31m";
-        std::cout<<color<<in.val[i]<<", "<<"\033[0m";
+        std::cout << in.x.val[i] << ", ";
     }
-    printf("%s",end);
-}
-
-void print_G1_project(std::string& functionName, G1_projective in, uint32_t* expected) {
-    G1_projective exp;
-    memcpy(&exp,expected,sizeof(G1_projective));
-    std::cout<<"-----"<<functionName<<"--------"<<std::endl;
-    print_fq(in.x,exp.x,"x:","\n");
-    print_fq(in.y,exp.y,"y:","\n");
-    print_fq(in.z,exp.z,"z:","\n");
-    std::cout << std::endl << std::endl;
-}
-
-void print_fq2(Fq2 in,Fq2 exp,const char* label,const char* end){
-    std::cout << label<<std::endl;
-    std::cout << "  c0: ";
+    std::cout << std::endl;
+    std::cout << "y: ";
     for (int i = 0; i < 12; i++) {
-        std::string color = in.c0.val[i]==exp.c0.val[i] ? "\033[1;32m" : "\033[1;31m";
-        std::cout<<color<<in.c0.val[i]<<", "<<"\033[0m";
+        std::cout << in.y.val[i] << ", ";
     }
-    std::cout <<std::endl<< "  c1: ";
+    std::cout << std::endl;
+    std::cout << "z: ";
     for (int i = 0; i < 12; i++) {
-        std::string color = in.c1.val[i]==exp.c1.val[i] ? "\033[1;32m" : "\033[1;31m";
-        std::cout<<color<<in.c1.val[i]<<", "<<"\033[0m";
+        std::cout << in.z.val[i] << ", ";
     }
-    printf("%s",end);
-}
-
-void print_G2_project(std::string& functionName, G2_projective in,uint32_t* expected) {
-    G2_projective exp;
-    memcpy(&exp,expected,sizeof(G2_projective));
-    std::cout<<"-----"<<functionName<<"--------"<<std::endl;
-    print_fq2(in.x,exp.x,"x:","\n");
-    print_fq2(in.y,exp.y,"y:","\n");
-    print_fq2(in.z,exp.z,"z:","\n");
     std::cout << std::endl << std::endl;
 }
 
@@ -1353,41 +1186,8 @@ void normal_print(uint *in) {
     }
 }
 
-std::pair<std::string,bool> g1_add_test();
-
-std::pair<std::string,bool> g1_add_mixed_test();
-
-std::pair<std::string,bool> g1_double_test();
-
-std::pair<std::string,bool> g2_add_test();
-
-std::pair<std::string,bool> g2_add_mixed_test();
-
-std::pair<std::string,bool> g2_double_test();
-
 int main() {
-    std::vector<std::pair<std::string,bool>> results{
-        g1_add_test(),
-        g1_double_test(),
-        g1_add_mixed_test(),
-        g2_add_test(),
-        g2_add_mixed_test(),
-        g2_double_test()
-    };
-
-    for(int i = 0;i<results.size();++i){
-        std::string result = results[i].second==true ? " success" : " failed";
-        std::string color = results[i].second==true ? "\033[1;32m" : "\033[1;31m";
-        std::cout<<color<<results[i].first<<"->" << result<<"\033[0m"<<std::endl;
-    }
-    std::cout<<std::endl;
-}
-
-
-
-std::pair<std::string,bool> g1_add_test(){
-    std::string testName = std::string(__FUNCTION__);
-        uint32_t a[36] = {0, 0, 0, 100, 0, 0, 0, 0, 0, 0, 0, 0, 196605, 1980301312, 3289120770, 3958636555, 1405573306,
+    uint32_t a[36] = {0, 0, 0, 100, 0, 0, 0, 0, 0, 0, 0, 0, 196605, 1980301312, 3289120770, 3958636555, 1405573306,
                       1598593111, 1884444485, 2010011731, 2723605613, 1543969431, 4202751123, 368467651, 0, 0, 0, 0, 0,
                       30, 0, 0, 0, 0, 0, 0};
 
@@ -1426,315 +1226,19 @@ std::pair<std::string,bool> g1_add_test(){
     hipMemcpy(&result, result_d, size, hipMemcpyDeviceToHost);
     hipDeviceSynchronize();
     check_hip_error();
-    print_G1_project(testName,result,cudaExpected);
+    print_G1_project(result);
 
     //flattening result
     uint32_t flattenResult[36];
     memcpy(flattenResult,&result,size);
 
-    bool isFailed = false;
     //assert cudaExpected vs result
     for (int i = 0; i < 36; ++i) {
-        if(flattenResult[i]!=cudaExpected[i]){
-            isFailed = true;
-            break;
-        }
+        assert(flattenResult[i]==cudaExpected[i]);
     }
 
-    
+    printf("No error\n\n");
     hipFree(a_d);
     hipFree(b_d);
     hipFree(result_d);
-    return std::make_pair(testName,!isFailed);
-}
-
-std::pair<std::string,bool> g1_add_mixed_test(){
-    std::string testName = std::string(__FUNCTION__);
-    uint32_t a[36] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                     196605, 1980301312, 3289120770, 3958636555, 1405573306, 1598593111, 1884444485, 2010011731, 2723605613, 1543969431, 4202751123, 368467651,
-                      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
-
-    uint32_t b[24] = {2210944813, 3909903087, 603786564, 3883152423, 2173389250, 2956470872, 809479795, 2862133481, 1088430826, 3104844840, 44451588, 226701902,
-                      2426309915, 1558163374, 4125809737, 2860931858, 1688959796, 3877074395, 4208292625, 4034170426, 2725679345, 1152044552, 819326913, 253933226};
-
-    uint32_t cudaExpected[36] = {2210944813, 3909903087, 603786564, 3883152423, 2173389250, 2956470872, 809479795, 2862133481, 1088430826, 3104844840, 44451588, 226701902,
-                                 2426309915, 1558163374, 4125809737, 2860931858, 1688959796, 3877074395, 4208292625, 4034170426, 2725679345, 1152044552, 819326913, 253933226,
-                                 196605, 1980301312, 3289120770, 3958636555, 1405573306, 1598593111, 1884444485, 2010011731, 2723605613, 1543969431, 4202751123, 368467651};
-
-
-    G1_projective *a_d, *result_d;
-    G1_affine *b_d;
-    G1_projective result;
-
-    auto size1 = sizeof(G1_projective);
-    auto affineSize = sizeof(G1_affine);
-    hipMalloc(&a_d, size1);
-    hipMalloc(&b_d, size1);
-    hipMalloc(&result_d, size1);
-    check_hip_error();
-
-    hipMemcpy(a_d, a, size1, hipMemcpyHostToDevice);
-    hipMemcpy(b_d, b, size1, hipMemcpyHostToDevice);
-    hipDeviceSynchronize();
-    check_hip_error();
-
-    hipLaunchKernelGGL(kernel_G1_add_mixed, dim3(1), dim3(1), 0, 0, a_d, b_d, result_d);
-
-    check_hip_error();
-    hipDeviceSynchronize();
-    check_hip_error();
-
-    hipMemcpy(&result, result_d, size1, hipMemcpyDeviceToHost);
-    hipDeviceSynchronize();
-    check_hip_error();
-    print_G1_project(testName,result,cudaExpected);
-
-    //flattening result
-    uint32_t flattenResult[36];
-    memcpy(flattenResult,&result,size1);
-
-    bool isFailed = false;
-    //assert cudaExpected vs result
-    for (int i = 0; i < 36; ++i) {
-        if(flattenResult[i]!=cudaExpected[i]){
-            isFailed = true;
-            break;
-        }
-    }
-
-    
-    hipFree(a_d);
-    hipFree(b_d);
-    hipFree(result_d);
-    return std::make_pair(testName,!isFailed);
-}
-
-std::pair<std::string,bool> g1_double_test(){
-    std::string testName = std::string(__FUNCTION__);
-        uint32_t a[36] = {572937709, 634652010, 3871286275, 3864143588, 3783419037, 150171507, 338481781, 1762702506, 3587247022, 3607080343,
-                         1065596025, 105422392, 4163356661, 4145517797, 1249234384, 623445957, 2245986326, 1226801719, 3402539388, 2329718207,
-                          1753974020, 2306590889, 1058907861, 340553794, 3700610293, 2964612715, 139187554, 805771328, 464361029, 96907019,
-                           1219116302, 2937647693, 1150263207, 4076011880, 1150866722, 228241594};
-
-    uint32_t cudaExpected[36] = {1632659750, 1265485755, 1750545604, 4265521061, 3934928281, 4157162780, 4059373350, 175259380,
-     1116337943, 828144285, 4015370401, 394235955, 1337058212, 2000076061, 4167958530, 3201785366, 190644621, 1217337187, 1281056040,
-      2380457106, 1843262342, 2768612874, 1950340553, 89436721, 459531309, 2907844289, 4049224835, 4075394049, 4006033233, 2142954301,
-       1167773149, 2944676389, 2627347026, 2069553728, 951579129, 432622738};
-
-
-    G1_projective *a_d, *result_d;
-    G1_projective result;
-
-    auto size = sizeof(G1_projective);
-    hipMalloc(&a_d, size);
-    hipMalloc(&result_d, size);
-    check_hip_error();
-
-    hipMemcpy(a_d, a, size, hipMemcpyHostToDevice);
-    hipDeviceSynchronize();
-    check_hip_error();
-
-    hipLaunchKernelGGL(kernel_G1_double, dim3(1), dim3(1), 0, 0, a_d, result_d);
-
-    check_hip_error();
-    hipDeviceSynchronize();
-    check_hip_error();
-
-    hipMemcpy(&result, result_d, size, hipMemcpyDeviceToHost);
-    hipDeviceSynchronize();
-    check_hip_error();
-    print_G1_project(testName,result, cudaExpected);
-
-    //flattening result
-    uint32_t flattenResult[36];
-    memcpy(flattenResult,&result,size);
-
-    bool isFailed = false;
-    //assert cudaExpected vs result
-    for (int i = 0; i < 36; ++i) {
-        if(flattenResult[i]!=cudaExpected[i]){
-            isFailed = true;
-            break;
-        }
-    }
-
-    
-    hipFree(a_d);
-    hipFree(result_d);
-    return std::make_pair(testName,!isFailed);
-}
-
-std::pair<std::string,bool> g2_add_test(){
-    std::string testName = std::string(__FUNCTION__);
-        uint32_t a[72] = {0, 0, 0, 100, 0, 0, 0, 0, 0, 0, 0, 0, 196605, 1980301312, 3289120770, 3958636555, 1405573306, 1598593111, 1884444485, 2010011731, 2723605613, 1543969431, 4202751123, 368467651, 0, 0, 0, 0, 0, 30, 0, 0, 0, 0, 0, 0,
-                               0, 0, 0, 100, 0, 0, 0, 0, 0, 0, 0, 0, 196605, 1980301312, 3289120770, 3958636555, 1405573306, 1598593111, 1884444485, 2010011731, 2723605613, 1543969431, 4202751123, 368467651, 0, 0, 0, 0, 0, 30, 0, 0, 0, 0, 0, 0};
-
-    uint32_t b[72] = {0, 0, 0, 200, 0, 0, 0, 0, 0, 0, 0, 0, 196605, 1980301312, 3289120770, 3958636555, 1405573306, 1598593111, 1884444485, 2010011731, 2723605613, 1543969431, 4202751123, 368467651, 0, 0, 0, 0, 0, 40, 0, 0, 0, 0, 0, 0,
-                               0, 0, 0, 200, 0, 0, 0, 0, 0, 0, 0, 0, 196605, 1980301312, 3289120770, 3958636555, 1405573306, 1598593111, 1884444485, 2010011731, 2723605613, 1543969431, 4202751123, 368467651, 0, 0, 0, 0, 0, 40, 0, 0, 0, 0, 0, 0};
-
-    uint32_t cudaExpected[72] = {208598400, 2694991227, 1047077762, 2846011457, 3072180666, 2586524079, 1102481180, 2748217909, 915908624, 1428853440,
-                                 185053769, 280202458, 896785299, 3995963242, 1823751211, 767703503, 1304145148, 662952197, 2882865842, 534777519,
-                                 1901401509, 1872043708, 2798653961, 293640618, 3539470131, 2137220391, 1597398656, 1117125724, 730634957, 1078887918,
-                                 1321721234, 1724952331, 613546324, 2748204274, 2525111799, 289271208,3887607577, 2510766255, 737788432, 3570942326,
-                                 2879936206, 962108494, 3792765839, 2585296344, 1640276112, 2758685254, 2846912960, 355409566, 532666578, 2246343696,
-                                 2174845458, 1995569759, 1202232624, 3706636086, 748146386, 2090841127, 1842967206, 618837610, 1931725633, 318850490,
-                                 519291090, 1999124522, 2412840922, 2084572850, 1743581217, 2719486829, 567872724, 45755210, 2616696815, 3919313717,
-                                 4275453181, 15054798};
-
-
-    G2_projective *a_d, *b_d, *result_d;
-    G2_projective result;
-
-    auto size = sizeof(G2_projective);
-    hipMalloc(&a_d, size);
-    hipMalloc(&b_d, size);
-    hipMalloc(&result_d, size);
-    check_hip_error();
-
-    hipMemcpy(a_d, a, size, hipMemcpyHostToDevice);
-    hipMemcpy(b_d, b, size, hipMemcpyHostToDevice);
-    hipDeviceSynchronize();
-    check_hip_error();
-
-    hipLaunchKernelGGL(kernel_G2_add, dim3(1), dim3(1), 0, 0, a_d, b_d, result_d);
-
-    check_hip_error();
-    hipDeviceSynchronize();
-    check_hip_error();
-
-    hipMemcpy(&result, result_d, size, hipMemcpyDeviceToHost);
-    hipDeviceSynchronize();
-    check_hip_error();
-    print_G2_project(testName,result,cudaExpected);
-
-    //flattening result
-    uint32_t flattenResult[72];
-    memcpy(flattenResult,&result,size);
-
-    bool isFailed = false;
-    //assert cudaExpected vs result
-    for (int i = 0; i < 72; ++i) {
-        if(flattenResult[i]!=cudaExpected[i]){
-            isFailed = true;
-            break;
-        }
-    }
-
-    
-    hipFree(a_d);
-    hipFree(b_d);
-    hipFree(result_d);
-    return std::make_pair(testName,!isFailed);
-}
-
-std::pair<std::string,bool> g2_add_mixed_test(){
-    std::string testName = std::string(__FUNCTION__);
-    uint32_t a[72] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 196605, 1980301312, 3289120770, 3958636555, 1405573306, 1598593111, 1884444485, 2010011731, 2723605613, 1543969431, 4202751123, 368467651, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 196605, 1980301312, 3289120770, 3958636555, 1405573306, 1598593111, 1884444485, 2010011731, 2723605613, 1543969431, 4202751123, 368467651, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
-
-    uint32_t b[48] = {2210944813, 3909903087, 603786564, 3883152423, 2173389250, 2956470872, 809479795, 2862133481, 1088430826, 3104844840,
-                      44451588,   226701902, 2426309915, 1558163374, 4125809737, 2860931858, 1688959796, 3877074395, 4208292625, 4034170426,
-                      2725679345, 1152044552, 819326913, 253933226, 2210944813, 3909903087, 603786564, 3883152423, 2173389250, 2956470872,
-                      809479795, 2862133481, 1088430826, 3104844840, 44451588, 226701902, 2426309915, 1558163374, 4125809737, 2860931858,
-                     1688959796, 3877074395, 4208292625, 4034170426, 2725679345, 1152044552, 819326913, 253933226};
-
-    uint32_t cudaExpected[72] = {630543538,2724914287,2928286071,1206988501,2890832672,1957021562,428270052,2832959188,454800231,280460773,2371362276,278770375,1711034215,786080655,2132723336,534742201,1414172201,793650756,3273312053,878272217,1768425118,3070428044,3865254552,313376622,1439687478,1699762003,2616701347,58055755,2869644811,210378998,3185430847,563614816,2438712083,188035116,717301920,93025059,2127133146,498565606,2156680602,1824566867,1488922578,1021153846,3024742101,4131599155,3962274867,1026693349,1379019381,285018239,126944175,404342239,2527468170,2956748879,207986017,4181688848,1828342311,4038727245,1047828733,654618778,3419187055,17126065,557237479,2276220765,353482893,2614146573,410598167,1993248169,143346264,1438889812,1133180384,476253848,2787769590,207208886};
-
-
-    G2_projective *a_d, *result_d;
-    G2_affine *b_d;
-    G2_projective result;
-
-    auto size = sizeof(G2_projective);
-    auto affineSize = sizeof(G2_affine);
-    hipMalloc(&a_d, size);
-    hipMalloc(&b_d, affineSize);
-    hipMalloc(&result_d, size);
-    check_hip_error();
-
-    hipMemcpy(a_d, a, size, hipMemcpyHostToDevice);
-    hipMemcpy(b_d, b, affineSize, hipMemcpyHostToDevice);
-    hipDeviceSynchronize();
-    check_hip_error();
-
-    hipLaunchKernelGGL(kernel_G2_add_mixed, dim3(1), dim3(1), 0, 0, a_d, b_d, result_d);
-
-    check_hip_error();
-    hipDeviceSynchronize();
-    check_hip_error();
-
-    hipMemcpy(&result, result_d, size, hipMemcpyDeviceToHost);
-    hipDeviceSynchronize();
-    check_hip_error();
-    print_G2_project(testName,result,cudaExpected);
-
-    //flattening result
-    uint32_t flattenResult[72];
-    memcpy(flattenResult,&result,size);
-
-    bool isFailed = false;
-    //assert cudaExpected vs result
-    for (int i = 0; i < 72; ++i) {
-        if(flattenResult[i]!=cudaExpected[i]){
-            isFailed = true;
-            break;
-        }
-    }
-
-    
-    hipFree(a_d);
-    hipFree(b_d);
-    hipFree(result_d);
-    return std::make_pair(testName,!isFailed);
-}
-
-std::pair<std::string,bool> g2_double_test(){
-    std::string testName = std::string(__FUNCTION__);
-    uint32_t a[72] = {572937709, 634652010, 3871286275, 3864143588, 3783419037, 150171507, 338481781, 1762702506, 3587247022, 3607080343, 1065596025, 105422392, 4163356661, 4145517797, 1249234384, 623445957, 2245986326, 1226801719, 3402539388, 2329718207, 1753974020, 2306590889, 1058907861, 340553794, 3700610293, 2964612715, 139187554, 805771328, 464361029, 96907019, 1219116302, 2937647693, 1150263207, 4076011880, 1150866722, 228241594,
-                                   572937709, 634652010, 3871286275, 3864143588, 3783419037, 150171507, 338481781, 1762702506, 3587247022, 3607080343, 1065596025, 105422392, 4163356661, 4145517797, 1249234384, 623445957, 2245986326, 1226801719, 3402539388, 2329718207, 1753974020, 2306590889, 1058907861, 340553794, 3700610293, 2964612715, 139187554, 805771328, 464361029, 96907019, 1219116302, 2937647693, 1150263207, 4076011880, 1150866722, 228241594};
-
-    uint32_t cudaExpected[72] = {3384291560, 884500155, 562551001, 1506254693, 3417674841, 1929197071, 1630878619, 728272718, 4220131018, 2130229034, 3504016523, 273936812, 2948027432, 638423744, 2081033080, 1489027210, 4085260338, 3827269722, 1523607993, 781941773, 1144299051, 1113946061, 2460346501, 31450159, 3653240316, 3446957739, 240118700, 3194897906, 1162413476, 371534618, 1424033393, 2544013989, 399862425, 2007398811, 987599719, 244151954, 60547311, 3114605181, 2302982681,
-                                      2513243313, 560584245, 2572847200, 3903698591, 3621260444, 2118880666, 103308072, 3065387905, 35064384, 1490758054, 1729390021, 1188585995, 416601573, 851875930, 801261935, 2505862590, 990050998, 774293611, 3700995950, 1470808578, 268104591, 334778596, 2987531052, 4094000946, 2653606598, 2870841776, 1235264205, 2792671188, 829949857, 977248672, 3206164523, 4008036371, 213969837};
-
-
-    G2_projective *a_d, *result_d;
-    G2_projective result;
-
-    auto size = sizeof(G2_projective);
-    auto affineSize = sizeof(G2_affine);
-    hipMalloc(&a_d, size);
-    hipMalloc(&result_d, size);
-    check_hip_error();
-
-    hipMemcpy(a_d, a, size, hipMemcpyHostToDevice);
-    hipDeviceSynchronize();
-    check_hip_error();
-
-    hipLaunchKernelGGL(kernel_G2_double, dim3(1), dim3(1), 0, 0, a_d, result_d);
-
-    check_hip_error();
-    hipDeviceSynchronize();
-    check_hip_error();
-
-    hipMemcpy(&result, result_d, size, hipMemcpyDeviceToHost);
-    hipDeviceSynchronize();
-    check_hip_error();
-    print_G2_project(testName,result,cudaExpected);
-
-    //flattening result
-    uint32_t flattenResult[72];
-    memcpy(flattenResult,&result,size);
-
-    bool isFailed = false;
-    //assert cudaExpected vs result
-    for (int i = 0; i < 72; ++i) {
-        if(flattenResult[i]!=cudaExpected[i]){
-            isFailed = true;
-            break;
-        }
-    }
-
-    
-    hipFree(a_d);
-    hipFree(result_d);
-    return std::make_pair(testName,!isFailed);
 }

@@ -4,7 +4,7 @@ ifeq (,$(HIP_PATH))
 endif
 HIPCC=$(HIP_PATH)/bin/hipcc
 
-CXXFLAGS += -std=c++14 -O0 -I/opt/include/
+CXXFLAGS += -std=c++14 -O3 -I/opt/include/ -DMULTI_AS
 
 g1_add: g1_add.cu
 ifeq ($(shell which $(HIPCC) > /dev/null; echo $$?), 0)
