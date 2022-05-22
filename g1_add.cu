@@ -89,54 +89,34 @@ DEVICE inline uint32_t addc(uint32_t a, uint32_t b) {
 
 DEVICE inline uint32_t madlo_cc(uint32_t a, uint32_t b, uint32_t c) {
   uint32_t r;
-#if defined(MULTI_ASM)
-  asm volatile("v_mul_lo_u32 %0, %1, %2" : "+v"(r): "v"(a), "v"(b));
-  asm volatile("v_add_co_u32 %0, vcc, %0, %1" : "+v"(r): "v"(c) : "vcc");
-#else
-    asm volatile("v_mul_lo_u32 %0, %1, %2;\r\n"
-                 "v_add_co_u32 %0, vcc, %0, %3;\r\n"
-                 : "+v"(r) : "v"(a), "v"(b), "v"(c) : "vcc");
-#endif
+  asm volatile("v_mul_lo_u32 %0, %1, %2;\r\n"
+               "v_add_co_u32 %0, vcc, %0, %3;\r\n"
+               : "+v"(r) : "v"(a), "v"(b), "v"(c) : "vcc");
     return r;
 }
 
 DEVICE inline uint32_t madloc_cc(uint32_t a, uint32_t b, uint32_t c) {
   uint32_t r;
-#if defined(MULTI_ASM)
-  asm volatile("v_mul_lo_u32 %0, %1, %2" : "+v"(r): "v"(a), "v"(b));
-  asm volatile("v_addc_co_u32 %0, vcc, %0, %1, vcc" : "+v"(r): "v"(c): "vcc");
-#else
-    asm volatile("v_mul_lo_u32 %0, %1, %2;\r\n"
-                 "v_addc_co_u32 %0, vcc, %0, %3, vcc;\r\n" 
-                  : "+v"(r): "v"(a), "v"(b), "v"(c): "vcc");
-#endif
+  asm volatile("v_mul_lo_u32 %0, %1, %2;\r\n"
+               "v_addc_co_u32 %0, vcc, %0, %3, vcc;\r\n" 
+               : "+v"(r): "v"(a), "v"(b), "v"(c): "vcc");
     return r;
 }
 
 DEVICE inline uint32_t madhi_cc(uint32_t a, uint32_t b, uint32_t c) {
   uint32_t r;
-#if defined(MULTI_ASM)
-  asm volatile("v_mul_hi_u32 %0, %1, %2" : "+v"(r): "v"(a), "v"(b));
-  asm volatile("v_add_co_u32 %0, vcc, %0, %1" : "+v"(r): "v"(c) : "vcc");
-#else
-    asm volatile("v_mul_hi_u32 %0, %1, %2;\r\n" 
-                 "v_add_co_u32 %0, vcc, %0, %3;\r\n"
-                 : "+v"(r) : "v"(a), "v"(b), "v"(c) : "vcc");
-#endif
+  asm volatile("v_mul_hi_u32 %0, %1, %2;\r\n" 
+               "v_add_co_u32 %0, vcc, %0, %3;\r\n"
+               : "+v"(r) : "v"(a), "v"(b), "v"(c) : "vcc");
     return r;
 }
 
 DEVICE inline uint32_t madhic_cc(uint32_t a, uint32_t b, uint32_t c) {
   uint32_t r;
-#if defined(MULTI_ASM)  
-  asm volatile("v_mul_hi_u32 %0, %1, %2;" : "+v"(r): "v"(a), "v"(b));
-  asm volatile("v_addc_co_u32 %0, vcc, %0, %1, vcc;" : "+v"(r): "v"(c): "vcc");
-#else
-    asm volatile("v_mul_hi_u32 %0, %1, %2;\r\n"
-                 "v_addc_co_u32 %0, vcc, %0, %3, vcc;\r\n"
-                 : "+v"(r) : "v"(a), "v"(b), "v"(c) : "vcc");
-#endif
-    return r;
+  asm volatile("v_mul_hi_u32 %0, %1, %2;\r\n"
+               "v_addc_co_u32 %0, vcc, %0, %3, vcc;\r\n"
+               : "+v"(r) : "v"(a), "v"(b), "v"(c) : "vcc");
+return r;
 }
 
 typedef struct {

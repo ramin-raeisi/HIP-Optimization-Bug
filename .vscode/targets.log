@@ -8,7 +8,7 @@ make: *** No rule to make target 'all'.  Stop.
 # This is free software: you are free to change and redistribute it.
 # There is NO WARRANTY, to the extent permitted by law.
 
-# Make data base, printed on Sat May 21 05:53:51 2022
+# Make data base, printed on Sun May 22 08:45:09 2022
 
 # Variables
 
@@ -43,7 +43,7 @@ SHELL = /bin/sh
 # environment
 VSCODE_NLS_CONFIG = {"locale":"en","availableLanguages":{}}
 # environment
-_ = /home/c9/.vscode-server/bin/c3511e6c69bb39013c4a4b7b9566ec1ca73fc4d5/node
+_ = /home/c9/.vscode-server/bin/dfd34e8260c270da74b5c2d86d61aee4b6d56977/node
 # makefile (from 'Makefile', line 1)
 MAKEFILE_LIST :=  Makefile
 # 'override' directive
@@ -61,9 +61,9 @@ LESSOPEN = | /usr/bin/lesspipe %s
 # environment
 VSCODE_CWD = /home/c9
 # environment
-SSH_CONNECTION = 5.116.51.201 50349 192.168.0.161 22
+SSH_CONNECTION = 94.183.86.148 50303 192.168.0.161 22
 # environment
-PATH = /home/c9/.vscode-server/bin/c3511e6c69bb39013c4a4b7b9566ec1ca73fc4d5/bin/remote-cli:/home/c9/.local/bin:/home/c9/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin:/opt/rocm/bin:/opt/rocm/rocprofiler/bin:/opt/rocm/opencl/bin:/opt/rocm/bin:/opt/rocm/rocprofiler/bin:/opt/rocm/opencl/bin:/opt/rocm/bin:/opt/rocm/rocprofiler/bin:/opt/rocm/opencl/bin:/usr/local/go/bin:/usr/local/go/bin:/opt/rocm/lib
+PATH = /home/c9/.vscode-server/bin/dfd34e8260c270da74b5c2d86d61aee4b6d56977/bin/remote-cli:/home/c9/.local/bin:/home/c9/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin:/opt/rocm/bin:/opt/rocm/rocprofiler/bin:/opt/rocm/opencl/bin:/opt/rocm/bin:/opt/rocm/rocprofiler/bin:/opt/rocm/opencl/bin:/opt/rocm/bin:/opt/rocm/rocprofiler/bin:/opt/rocm/opencl/bin:/usr/local/go/bin:/usr/local/go/bin:/opt/rocm/lib
 # environment
 XDG_RUNTIME_DIR = /run/user/1000
 # makefile (from 'Makefile', line 5)
@@ -75,7 +75,7 @@ LIBRARY_PATH = :/opt/rocm/lib/
 # environment
 VSCODE_LOG_STACK = false
 # environment
-VSCODE_IPC_HOOK_CLI = /run/user/1000/vscode-ipc-86105bcf-1ef1-407a-ada8-fbb325032ec4.sock
+VSCODE_IPC_HOOK_CLI = /run/user/1000/vscode-ipc-0cf34b8a-5704-4126-bee7-f2e180d3ebed.sock
 # default
 .FEATURES := target-specific order-only second-expansion else-if shortest-stem undefine oneshell archives jobserver output-sync check-symlink load
 # environment
@@ -121,7 +121,7 @@ SHLVL = 0
 # environment
 GPU_USE_SYNC_OBJECTS = 1
 # environment
-XDG_SESSION_ID = 243
+XDG_SESSION_ID = 287
 # environment
 USER = c9
 # makefile
@@ -145,13 +145,11 @@ MAKEFLAGS = pqrR
 # environment
 MFLAGS = -pqrR
 # environment
-SSH_CLIENT = 5.116.51.201 50349 22
+SSH_CLIENT = 94.183.86.148 50303 22
 # automatic
 +D = $(patsubst %/,%,$(dir $+))
 # environment
-BROWSER = /home/c9/.vscode-server/bin/c3511e6c69bb39013c4a4b7b9566ec1ca73fc4d5/bin/helpers/browser.sh
-# environment
-VSCODE_HANDLES_SIGPIPE = true
+BROWSER = /home/c9/.vscode-server/bin/dfd34e8260c270da74b5c2d86d61aee4b6d56977/bin/helpers/browser.sh
 # 'override' directive
 .SHELLSTATUS := 0
 # default
@@ -177,7 +175,7 @@ VSCODE_EXTHOST_WILL_SEND_SOCKET = true
 # environment
 MOTD_SHOWN = pam
 # variable set hash-table stats:
-# Load=82/1024=8%, Rehash=0, Collisions=9/115=8%
+# Load=81/1024=8%, Rehash=0, Collisions=9/114=8%
 
 # Pattern-specific Variable Values
 
@@ -185,9 +183,9 @@ MOTD_SHOWN = pam
 
 # Directories
 
-# . (device 2051, inode 13108220): 14 files, no impossibilities.
+# . (device 2051, inode 13108220): 13 files, no impossibilities.
 
-# 14 files, no impossibilities in 1 directories.
+# 13 files, no impossibilities in 1 directories.
 
 # Implicit Rules
 
@@ -216,7 +214,7 @@ all:
 # Not a target:
 Makefile:
 #  Implicit rule search has been done.
-#  Last modified 2022-05-20 11:42:10.007929486
+#  Last modified 2022-05-21 14:27:28.063494353
 #  File has been updated.
 #  Successfully updated.
 
@@ -252,9 +250,9 @@ clean:
 # strcache buffers: 1 (0) / strings = 21 / storage = 199 B / avg = 9 B
 # current buf: size = 8162 B / used = 199 B / count = 21 / avg = 9 B
 
-# strcache performance: lookups = 31 / hit rate = 32%
+# strcache performance: lookups = 30 / hit rate = 30%
 # hash-table stats:
-# Load=21/8192=0%, Rehash=0, Collisions=1/31=3%
-# Finished Make data base on Sat May 21 05:53:51 2022
+# Load=21/8192=0%, Rehash=0, Collisions=1/30=3%
+# Finished Make data base on Sun May 22 08:45:09 2022
 
  
